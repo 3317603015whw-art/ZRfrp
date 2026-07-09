@@ -1,0 +1,32 @@
+# Build outputs
+bin/
+obj/
+FrpDesktop/bin/
+FrpDesktop/obj/
+
+# User and IDE state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and diagnostics
+*.log
+diag-*
+
+# Local temp/runtime data
+.codex-tmp/
+*.tmp
+*.temp
+
+# Release artifacts
+*.zip
+*.7z
+*.rar
+
+# OS files
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,88 @@
+<Window x:Class="FrpDesktop.TrayMenuWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:FrpDesktop"
+        Title="托盘菜单"
+        Width="330"
+        SizeToContent="Height"
+        MaxHeight="560"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Deactivated="Window_Deactivated">
+    <Border Background="#0B141F"
+            BorderBrush="{StaticResource LineBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="12">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000"
+                              BlurRadius="24"
+                              ShadowDepth="8"
+                              Opacity="0.36" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Margin="2,0,2,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Image Width="24"
+                       Height="24"
+                       Source="Assets/AppLogo32.png"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Margin="0,0,10,0" />
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="ZRfrp"
+                               Foreground="White"
+                               FontSize="14"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="StatusText"
+                               Foreground="{StaticResource MutedBrush}"
+                               FontSize="11"
+                               Margin="0,2,0,0" />
+                </StackPanel>
+                <Button Grid.Column="2"
+                        Width="82"
+                        Height="32"
+                        MinWidth="0"
+                        Padding="0"
+                        Content="打开"
+                        Style="{StaticResource SecondaryButton}"
+                        Click="RestoreButton_Click" />
+            </Grid>
+
+            <Border Grid.Row="1"
+                    Height="1"
+                    Background="{StaticResource LineBrush}"
+                    Opacity="0.75"
+                    Margin="0,0,0,10" />
+
+            <ScrollViewer Grid.Row="2"
+                          MaxHeight="390"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          local:SmoothScroll.Enabled="True">
+                <StackPanel x:Name="ProfilesPanel" />
+            </ScrollViewer>
+
+            <Grid Grid.Row="3" Margin="0,12,0,0">
+                <Button Height="36"
+                        Content="彻底退出"
+                        Style="{StaticResource DangerButton}"
+                        Click="ExitButton_Click" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>
