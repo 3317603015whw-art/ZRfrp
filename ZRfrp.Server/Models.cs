@@ -38,6 +38,8 @@ public sealed class ServerState
     public List<ManagedNode> Nodes { get; set; } = [];
     public List<ManagedClient> Clients { get; set; } = [];
     public Dictionary<string, long> TrafficSnapshots { get; set; } = [];
+    public bool RegistrationEnabled { get; set; } = true;
+    public long RegistrationQuotaBytes { get; set; } = 1024L * 1024 * 1024;
 }
 
 public sealed class UserAccount
@@ -106,6 +108,9 @@ public sealed record AuditEntry(DateTimeOffset Time, string Action, string Detai
 public sealed record LoginRequest(string Username, string Password);
 public sealed record PasswordChangeRequest(string CurrentPassword, string NewPassword);
 public sealed record AccountRequest(string Username, string Password, string Role, long TrafficQuotaBytes, bool Enabled);
+public sealed record RegistrationSettingsRequest(bool Enabled, long DefaultTrafficQuotaBytes);
+public sealed record NodeEnrollmentRequest(string Name, string PublicHost, string MasterUrl);
+public sealed record NodeEnrollmentResponse(string Id, string Name, string Command);
 public sealed record ClientLoginRequest(string Username, string Password, string ClientId);
 public sealed record ClientLoginResponse(
     string AccountId, string Username, string AccessToken, DateTimeOffset ExpiresAt,

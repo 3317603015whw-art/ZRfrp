@@ -113,6 +113,42 @@ app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext context,
     return Results.Ok(new { ok = true, role = account.Role, username = account.Username });
 });
 
+app.MapGet("/api/auth/registration", (StateStore store) => Results.Ok(new
+{
+    enabled = store.State.RegistrationEnabled,
+    defaultTrafficQuotaBytes = store.State.RegistrationQuotaBytes
+}));
+
+app.MapPost("/api/auth/register", async (LoginRequest request, StateStore store) =>
+{
+    var username = request.Username?.Trim() ?? "";
+    if (!store.State.RegistrationEnabled)
+    {
+        return Results.Json(new { error = "当前平台暂未开放账号注册。" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    if (username.Length is < 3 or > 32 || request.Password?.Length < 8)
+    {
+        return Results.BadRequest(new { error = "用户名需为 3 至 32 个字符，密码至少需要 8 个字符。" });
+    }
+    if (username.Any(char.IsWhiteSpace) || store.State.Accounts.Any(item =>
+            item.Username.Equals(username, StringComparison.OrdinalIgnoreCase)))
+    {
+        return Results.BadRequest(new { error = "用户名不可用或已存在。" });
+    }
+
+    var account = new UserAccount
+    {
+        Username = username,
+        PasswordHash = Security.Hash(request.Password ?? ""),
+        Role = "customer",
+        Enabled = true,
+        TrafficQuotaBytes = Math.Max(0, store.State.RegistrationQuotaBytes)
+    };
+    store.State.Accounts.Add(account);
+    await store.AuditAsync("account", $"客户自助注册账号 {account.Username}");
+    return Results.Ok(new { message = "账号注册成功，请使用新账号登录。", username = account.Username });
+});
+
 app.MapPost("/api/auth/logout", async (HttpContext context) =>
 {
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -342,6 +378,27 @@ app.MapPost("/api/admin/accounts/{id}/reset-traffic", async (
     return Results.Ok();
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
+app.MapGet("/api/admin/registration-settings", (StateStore store) => Results.Ok(new
+{
+    enabled = store.State.RegistrationEnabled,
+    defaultTrafficQuotaBytes = store.State.RegistrationQuotaBytes
+})).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPut("/api/admin/registration-settings", async (
+    RegistrationSettingsRequest request, StateStore store) =>
+{
+    store.State.RegistrationEnabled = request.Enabled;
+    store.State.RegistrationQuotaBytes = Math.Max(0, request.DefaultTrafficQuotaBytes);
+    await store.AuditAsync(
+        "account",
+        $"自助注册已{(request.Enabled ? "开启" : "关闭")}，默认额度 {request.DefaultTrafficQuotaBytes} B");
+    return Results.Ok(new
+    {
+        enabled = store.State.RegistrationEnabled,
+        defaultTrafficQuotaBytes = store.State.RegistrationQuotaBytes
+    });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
 app.MapGet("/api/config/model", async (FrpsConfigService config) =>
     Results.Ok(await config.ReadModelAsync()))
     .RequireAuthorization(policy => policy.RequireRole("admin"));
@@ -418,6 +475,47 @@ app.MapGet("/api/admin/nodes", (StateStore store, ServerOptions serverOptions) =
         node.Online = node.Online && node.LastSeen >= cutoff;
     }
     return Results.Ok(store.State.Nodes);
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/admin/nodes/enrollment", async (
+    NodeEnrollmentRequest request, StateStore store, ServerOptions serverOptions) =>
+{
+    var name = request.Name?.Trim() ?? "";
+    var publicHost = request.PublicHost?.Trim() ?? "";
+    var masterUrl = request.MasterUrl?.Trim().TrimEnd('/') ?? "";
+    if (name.Length is < 2 or > 64 || string.IsNullOrWhiteSpace(publicHost)
+        || publicHost.Any(char.IsWhiteSpace)
+        || publicHost.Contains('/') || publicHost.Contains('\\'))
+    {
+        return Results.BadRequest(new { error = "请填写有效的节点名称和公网地址。" });
+    }
+    if (!Uri.TryCreate(masterUrl, UriKind.Absolute, out var masterUri)
+        || masterUri.Scheme is not ("http" or "https"))
+    {
+        return Results.BadRequest(new { error = "主控面板地址必须是可被新节点访问的 http:// 或 https:// 地址。" });
+    }
+    if (string.IsNullOrWhiteSpace(serverOptions.PeerKey))
+    {
+        return Results.BadRequest(new { error = "主控尚未配置节点 Peer Key，请重新安装或检查服务端配置。" });
+    }
+
+    var id = $"node-{Guid.NewGuid():N}"[..17];
+    store.State.Nodes.Add(new ManagedNode
+    {
+        Id = id,
+        Name = name,
+        PublicHost = publicHost,
+        ControlUrl = $"http://{publicHost}:7600",
+        FrpsPort = serverOptions.FrpsBindPort,
+        Online = false,
+        LastSeen = DateTimeOffset.UtcNow
+    });
+    await store.AuditAsync("node", $"创建待接入节点 {name} ({publicHost})");
+
+    return Results.Ok(new NodeEnrollmentResponse(
+        id,
+        name,
+        CreateNodeEnrollmentCommand(id, name, publicHost, masterUri.ToString().TrimEnd('/'), serverOptions.PeerKey)));
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapGet("/api/admin/nodes/export", (
@@ -843,6 +941,19 @@ static async Task InitializeSecretsAsync(StateStore store, ILogger logger)
         await store.SaveAsync();
     }
 }
+
+static string CreateNodeEnrollmentCommand(
+    string nodeId, string name, string publicHost, string masterUrl, string peerKey)
+{
+    const string installer = "https://raw.githubusercontent.com/3317603015whw-art/ZRfrp/main/ZRfrp.Server/deploy/install.sh";
+    return $"curl -fsSL {ShellQuote(installer)} | sudo env "
+           + $"ZRFRP_MODE=node ZRFRP_NODE_ID={ShellQuote(nodeId)} "
+           + $"ZRFRP_NODE_NAME={ShellQuote(name)} ZRFRP_PUBLIC_HOST={ShellQuote(publicHost)} "
+           + $"ZRFRP_MASTER_URL={ShellQuote(masterUrl)} ZRFRP_MASTER_KEY={ShellQuote(peerKey)} "
+           + $"ZRFRP_PEER_KEY={ShellQuote(peerKey)} bash";
+}
+
+static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'") + "'";
 
 static string ActionName(string action) => action switch
 {
