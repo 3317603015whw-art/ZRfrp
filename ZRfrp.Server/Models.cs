@@ -36,6 +36,7 @@ public sealed class ServerState
     public List<UserAccount> Accounts { get; set; } = [];
     public List<AccountSession> AccountSessions { get; set; } = [];
     public List<ManagedNode> Nodes { get; set; } = [];
+    public List<ManagedClient> Clients { get; set; } = [];
     public Dictionary<string, long> TrafficSnapshots { get; set; } = [];
 }
 
@@ -71,6 +72,17 @@ public sealed class ManagedNode
     public int ActiveProxies { get; set; }
     public DateTimeOffset LastSeen { get; set; }
     public string Version { get; set; } = "";
+}
+
+public sealed class ManagedClient
+{
+    public string ClientId { get; set; } = "";
+    public string AccountId { get; set; } = "";
+    public string Username { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string Protocol { get; set; } = "frpc";
+    public DateTimeOffset ConnectedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class PortAllocation

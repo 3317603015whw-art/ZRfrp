@@ -1,4 +1,10 @@
-# ZRfrp v2.1.2
+# ZRfrp v2.1.3
+
+- 客户端节点名前缀支持稳定显示日本国旗，不再依赖 Windows emoji 字体。
+- 服务端面板客户端列表改为由 frps 插件 Login/Ping 事件兜底追踪，连接后更可靠显示在线客户端。
+- Desktop 图标回滚到 v2.1.0 版本，并为 Web 面板添加浏览器标签页 favicon。
+
+## v2.1.2
 
 - 修复服务端插件按隧道名称查找租约导致 `tunnel has no active server allocation` 的问题，现在优先使用隧道 ID 匹配。
 - 导入节点时自动缩短机器名类长名称，避免客户端侧栏和标题被撑开。

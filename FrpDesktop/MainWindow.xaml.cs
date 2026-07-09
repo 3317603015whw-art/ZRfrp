@@ -9,6 +9,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using DrawingIcon = System.Drawing.Icon;
 using Forms = System.Windows.Forms;
@@ -1404,7 +1405,17 @@ public partial class MainWindow : Window
         _selectedProfile = profile;
         _state.LastProfileId = profile?.Id;
 
-        HeaderTitle.Text = profile?.Name ?? "尚未添加节点";
+        HeaderTitle.Text = profile?.NameWithoutFlag ?? "尚未添加节点";
+        if (profile?.HasFlagIcon == true)
+        {
+            HeaderFlagImage.Source = new BitmapImage(new Uri(profile.FlagIconPath, UriKind.Relative));
+            HeaderFlagImage.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            HeaderFlagImage.Source = null;
+            HeaderFlagImage.Visibility = Visibility.Collapsed;
+        }
         NodeGeneratedConfigTextBox.Text = profile is null ? "" : _store.GetGeneratedConfigPath(profile);
         ProxiesList.ItemsSource = profile?.Proxies;
         ProxyProfileComboBox.SelectedItem = profile;

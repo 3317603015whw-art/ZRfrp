@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace FrpDesktop;
@@ -61,8 +62,25 @@ public sealed class FrpProfile : ObservableObject
     public string Name
     {
         get => _name;
-        set => SetField(ref _name, value);
+        set
+        {
+            if (SetField(ref _name, value))
+            {
+                OnPropertyChanged(nameof(NameWithoutFlag));
+                OnPropertyChanged(nameof(FlagIconPath));
+                OnPropertyChanged(nameof(HasFlagIcon));
+            }
+        }
     }
+
+    [JsonIgnore]
+    public string NameWithoutFlag => RemoveLeadingFlag(Name);
+
+    [JsonIgnore]
+    public string FlagIconPath => GetLeadingFlagCode(Name) == "JP" ? "Assets/Flags/jp.png" : "";
+
+    [JsonIgnore]
+    public bool HasFlagIcon => !string.IsNullOrWhiteSpace(FlagIconPath);
 
     public string FrpcPath
     {
@@ -197,6 +215,44 @@ public sealed class FrpProfile : ObservableObject
             AccountTokenExpiresAt = AccountTokenExpiresAt,
             Proxies = new ObservableCollection<FrpProxy>(Proxies.Select(proxy => proxy.Clone()))
         };
+    }
+
+    private static string RemoveLeadingFlag(string value)
+    {
+        var normalized = value.Replace("\ufe0f", "", StringComparison.Ordinal).TrimStart();
+        var code = GetLeadingFlagCode(normalized);
+        if (code.Length != 2)
+        {
+            return value;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var rune in normalized.EnumerateRunes().Skip(2))
+        {
+            builder.Append(rune.ToString());
+        }
+        return builder.ToString().TrimStart();
+    }
+
+    private static string GetLeadingFlagCode(string value)
+    {
+        var runes = value.Replace("\ufe0f", "", StringComparison.Ordinal).TrimStart().EnumerateRunes().Take(2).ToArray();
+        if (runes.Length < 2)
+        {
+            return "";
+        }
+
+        Span<char> code = stackalloc char[2];
+        for (var i = 0; i < 2; i++)
+        {
+            var number = runes[i].Value;
+            if (number is < 0x1F1E6 or > 0x1F1FF)
+            {
+                return "";
+            }
+            code[i] = (char)('A' + number - 0x1F1E6);
+        }
+        return new string(code);
     }
 }
 

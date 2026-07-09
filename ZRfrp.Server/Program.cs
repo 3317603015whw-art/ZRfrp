@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -136,12 +137,28 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, ServerOpt
     var healthTask = frps.IsReachableAsync(cancellationToken);
     await Task.WhenAll(serverTask, clientsTask, tcpTask, udpTask, httpTask, httpsTask, healthTask);
     var frpsStatus = await frps.GetInstallStatusAsync(cancellationToken);
+    var clientCutoff = DateTimeOffset.UtcNow.AddSeconds(-60);
+    store.State.Clients.RemoveAll(client => client.LastSeen < clientCutoff);
+    var trackedClients = store.State.Clients.Select(client => new
+    {
+        clientID = client.ClientId,
+        clientAddress = client.Address,
+        status = "online",
+        protocol = client.Protocol,
+        connectTime = client.ConnectedAt,
+        lastSeen = client.LastSeen,
+        username = client.Username
+    }).ToArray();
+    object clients = DashboardHasItems(clientsTask.Result)
+        ? clientsTask.Result!.Value
+        : trackedClients;
     return Results.Ok(new
     {
         reachable = healthTask.Result,
         frpsStatus,
         server = serverTask.Result,
-        clients = clientsTask.Result,
+        clients,
+        trackedClients,
         proxies = new { tcp = tcpTask.Result, udp = udpTask.Result, http = httpTask.Result, https = httpsTask.Result },
         publicHost = PublicFrpsHost(serverOptions),
         bindPort = serverOptions.FrpsBindPort,
@@ -526,7 +543,7 @@ app.MapDelete("/api/client/allocations/{id}", async (
 });
 
 app.MapPost("/frp-plugin", async (
-    HttpContext context, AllocationService allocations, AccountService accounts) =>
+    HttpContext context, AllocationService allocations, AccountService accounts, StateStore store) =>
 {
     if (context.Connection.RemoteIpAddress is null
         || !System.Net.IPAddress.IsLoopback(context.Connection.RemoteIpAddress))
@@ -553,6 +570,19 @@ app.MapPost("/frp-plugin", async (
         if (accounts.IsQuotaExceeded(account))
         {
             return Results.Ok(new { reject = true, reject_reason = "ZRfrp: traffic quota exceeded" });
+        }
+        await TrackClientAsync(store, account, context, content);
+        return Results.Ok(new { reject = false, unchange = true });
+    }
+
+    if (operation == "Ping")
+    {
+        var metas = FindMetas(content);
+        var accessToken = metas?["zrfrp_access_token"]?.GetValue<string>() ?? "";
+        var account = accounts.ValidateAccessToken(accessToken);
+        if (account is not null)
+        {
+            await TrackClientAsync(store, account, context, content);
         }
         return Results.Ok(new { reject = false, unchange = true });
     }
@@ -616,6 +646,102 @@ static UserAccount? GetBearerAccount(HttpContext context, AccountService account
     return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
         ? accounts.ValidateAccessToken(authorization[7..].Trim())
         : null;
+}
+
+static bool DashboardHasItems(JsonElement? element)
+{
+    if (element is null)
+    {
+        return false;
+    }
+
+    var value = element.Value;
+    if (value.ValueKind == JsonValueKind.Array)
+    {
+        return value.GetArrayLength() > 0;
+    }
+
+    if (value.ValueKind != JsonValueKind.Object)
+    {
+        return false;
+    }
+
+    foreach (var propertyName in new[] { "clients" })
+    {
+        if (!value.TryGetProperty(propertyName, out var property))
+        {
+            continue;
+        }
+        if (property.ValueKind == JsonValueKind.Array && property.GetArrayLength() > 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static async Task TrackClientAsync(StateStore store, UserAccount account, HttpContext context, JsonObject content)
+{
+    var clientId = ReadClientId(content);
+    if (string.IsNullOrWhiteSpace(clientId))
+    {
+        clientId = account.Id;
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var client = store.State.Clients.FirstOrDefault(item =>
+        item.ClientId.Equals(clientId, StringComparison.Ordinal));
+    if (client is null)
+    {
+        client = new ManagedClient
+        {
+            ClientId = clientId,
+            ConnectedAt = now
+        };
+        store.State.Clients.Add(client);
+    }
+
+    client.AccountId = account.Id;
+    client.Username = account.Username;
+    client.Address = context.Connection.RemoteIpAddress?.ToString() ?? "";
+    client.Protocol = "frpc";
+    client.LastSeen = now;
+    await store.SaveAsync();
+}
+
+static string ReadClientId(JsonObject content)
+{
+    var metas = FindMetas(content);
+    var fromMeta = metas?["zrfrp_client_id"]?.GetValue<string>() ?? "";
+    if (!string.IsNullOrWhiteSpace(fromMeta))
+    {
+        return fromMeta;
+    }
+
+    foreach (var key in new[] { "client_id", "clientID", "run_id", "runId" })
+    {
+        if (content[key] is JsonValue value && value.TryGetValue<string>(out var text)
+            && !string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+    }
+
+    return "";
+}
+
+static JsonObject? FindMetas(JsonObject content)
+{
+    if (content["metas"] is JsonObject metas)
+    {
+        return metas;
+    }
+    if (content["user"] is JsonObject user && user["metas"] is JsonObject userMetas)
+    {
+        return userMetas;
+    }
+    return null;
 }
 
 static bool ValidatePeerKey(HttpContext context, string expected)

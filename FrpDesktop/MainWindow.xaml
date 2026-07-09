@@ -178,12 +178,19 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <TextBlock Text="{Binding Name}"
-                                                   Foreground="White"
-                                                   FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   MaxWidth="188"
-                                                   Margin="0,0,8,0" />
+                                        <StackPanel Orientation="Horizontal"
+                                                    Margin="0,0,8,0">
+                                            <Image Source="{Binding FlagIconPath}"
+                                                   Width="18"
+                                                   Height="18"
+                                                   Margin="0,1,5,0"
+                                                   Visibility="{Binding HasFlagIcon, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <TextBlock Text="{Binding NameWithoutFlag}"
+                                                       Foreground="White"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       MaxWidth="165" />
+                                        </StackPanel>
                                         <Button Grid.Column="1"
                                                 Grid.RowSpan="2"
                                                 Style="{StaticResource TextOnlyButton}"
@@ -266,13 +273,20 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel>
-                            <TextBlock x:Name="HeaderTitle"
-                                       Text="默认连接"
-                                       Foreground="White"
-                                       FontSize="28"
-                                       FontWeight="Bold"
-                                       TextTrimming="CharacterEllipsis"
-                                       MaxWidth="600" />
+                            <StackPanel Orientation="Horizontal">
+                                <Image x:Name="HeaderFlagImage"
+                                       Width="30"
+                                       Height="30"
+                                       Margin="0,4,8,0"
+                                       Visibility="Collapsed" />
+                                <TextBlock x:Name="HeaderTitle"
+                                           Text="默认连接"
+                                           Foreground="White"
+                                           FontSize="28"
+                                           FontWeight="Bold"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="560" />
+                            </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <Ellipse x:Name="StatusDot"
                                          Width="10"
