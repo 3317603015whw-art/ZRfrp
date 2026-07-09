@@ -25,6 +25,10 @@ public sealed class AppState
 
     public bool ExitOnCloseWhenDisconnected { get; set; }
 
+    public string PlatformUrl { get; set; } = "";
+
+    public string AccountUsername { get; set; } = "";
+
     public ObservableCollection<FrpProfile> Profiles { get; set; } = new();
 }
 
@@ -42,6 +46,9 @@ public sealed class FrpProfile : ObservableObject
     private bool _serverManaged;
     private string _controlApiUrl = "";
     private string _controlApiKey = "";
+    private string _accountId = "";
+    private string _accountAccessToken = "";
+    private DateTimeOffset _accountTokenExpiresAt;
 
     public string Id
     {
@@ -95,6 +102,24 @@ public sealed class FrpProfile : ObservableObject
     {
         get => _controlApiKey;
         set => SetField(ref _controlApiKey, value);
+    }
+
+    public string AccountId
+    {
+        get => _accountId;
+        set => SetField(ref _accountId, value);
+    }
+
+    public string AccountAccessToken
+    {
+        get => _accountAccessToken;
+        set => SetField(ref _accountAccessToken, value);
+    }
+
+    public DateTimeOffset AccountTokenExpiresAt
+    {
+        get => _accountTokenExpiresAt;
+        set => SetField(ref _accountTokenExpiresAt, value);
     }
 
     [JsonIgnore]
@@ -165,6 +190,9 @@ public sealed class FrpProfile : ObservableObject
             ServerManaged = ServerManaged,
             ControlApiUrl = ControlApiUrl,
             ControlApiKey = ControlApiKey,
+            AccountId = AccountId,
+            AccountAccessToken = AccountAccessToken,
+            AccountTokenExpiresAt = AccountTokenExpiresAt,
             Proxies = new ObservableCollection<FrpProxy>(Proxies.Select(proxy => proxy.Clone()))
         };
     }

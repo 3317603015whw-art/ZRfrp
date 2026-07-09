@@ -45,7 +45,8 @@ if [[ -f /etc/zrfrp/zrfrp.env ]]; then
 fi
 ADMIN_PASSWORD="${ZRFRP_ADMIN_PASSWORD:-$(openssl rand -base64 18 | tr -d '/+=')}"
 CLIENT_KEY="${ZRFRP_CLIENT_API_KEY:-$(openssl rand -hex 32)}"
-FRP_TOKEN="${ZRFRP_FRP_TOKEN:-$(openssl rand -hex 24)}"
+FRP_TOKEN="${ZRFRP_FRP_TOKEN:-${ZRfrp__FrpAuthToken:-$(openssl rand -hex 24)}}"
+PEER_KEY="${ZRFRP_PEER_KEY:-${ZRfrp__PeerKey:-$(openssl rand -hex 32)}}"
 DASHBOARD_PASSWORD="$(openssl rand -hex 18)"
 
 if [[ ! -f /etc/zrfrp/frps.toml ]]; then
@@ -57,6 +58,13 @@ fi
 cat >/etc/zrfrp/zrfrp.env <<EOF
 ZRFRP_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 ZRFRP_CLIENT_API_KEY=${CLIENT_KEY}
+ZRfrp__FrpAuthToken=${FRP_TOKEN}
+ZRfrp__Mode=${ZRFRP_MODE:-master}
+ZRfrp__NodeId=${ZRFRP_NODE_ID:-$(hostname)}
+ZRfrp__NodeName=${ZRFRP_NODE_NAME:-$(hostname)}
+ZRfrp__MasterUrl=${ZRFRP_MASTER_URL:-}
+ZRfrp__MasterKey=${ZRFRP_MASTER_KEY:-}
+ZRfrp__PeerKey=${PEER_KEY}
 EOF
 chmod 0600 /etc/zrfrp/zrfrp.env
 
@@ -67,7 +75,7 @@ if [[ -z "${SUDO_PATH}" ]]; then
   exit 1
 fi
 cat >/etc/sudoers.d/zrfrp <<EOF
-zrfrp ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} start zrfrp-frps, ${SYSTEMCTL_PATH} stop zrfrp-frps, ${SYSTEMCTL_PATH} restart zrfrp-frps
+zrfrp ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} start zrfrp-frps, ${SYSTEMCTL_PATH} stop zrfrp-frps, ${SYSTEMCTL_PATH} restart zrfrp-frps, /usr/local/sbin/zrfrp-install-frps, /usr/local/sbin/zrfrp-update-server
 EOF
 chmod 0440 /etc/sudoers.d/zrfrp
 
@@ -85,6 +93,8 @@ fi
 
 cp /opt/zrfrp/server/deploy/zrfrp-server.service /etc/systemd/system/
 cp /opt/zrfrp/server/deploy/zrfrp-frps.service /etc/systemd/system/
+install -m 0755 /opt/zrfrp/server/deploy/install-frps.sh /usr/local/sbin/zrfrp-install-frps
+install -m 0755 /opt/zrfrp/server/deploy/update-server.sh /usr/local/sbin/zrfrp-update-server
 chown -R zrfrp:zrfrp /opt/zrfrp /var/lib/zrfrp /var/log/zrfrp
 chown root:zrfrp /etc/zrfrp
 chmod 0770 /etc/zrfrp
@@ -100,4 +110,5 @@ echo "面板地址: http://${PUBLIC_HOST}:7600"
 echo "管理员密码: ${ADMIN_PASSWORD}"
 echo "客户端 API Key: ${CLIENT_KEY}"
 echo "frp Token: ${FRP_TOKEN}"
+echo "节点 Peer Key: ${PEER_KEY}"
 echo "请立即保存以上凭据，并通过防火墙或 HTTPS 反向代理保护 7600 端口。"

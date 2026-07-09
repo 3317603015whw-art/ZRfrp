@@ -9,18 +9,40 @@ namespace ZRfrp.Server;
 public sealed class FrpsManager
 {
     private readonly ServerOptions _options;
-    private readonly HttpClient _http;
+    private HttpClient _http;
 
     public FrpsManager(ServerOptions options)
     {
         _options = options;
-        _http = new HttpClient { BaseAddress = new Uri(options.FrpsDashboardUrl.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(4) };
+        _http = CreateDashboardClient(options);
+    }
+
+    public void ApplyConfig(FrpsConfigModel model)
+    {
+        _options.FrpsBindPort = model.BindPort;
+        _options.PortRangeStart = model.PortRangeStart;
+        _options.PortRangeEnd = model.PortRangeEnd;
+        _options.FrpAuthToken = model.AuthToken;
+        _options.FrpsDashboardUrl = $"http://{model.DashboardAddress}:{model.DashboardPort}";
+        _options.FrpsDashboardUser = model.DashboardUser;
+        _options.FrpsDashboardPassword = model.DashboardPassword;
+        _http = CreateDashboardClient(_options);
+    }
+
+    private static HttpClient CreateDashboardClient(ServerOptions options)
+    {
+        var client = new HttpClient
+        {
+            BaseAddress = new Uri(options.FrpsDashboardUrl.TrimEnd('/') + "/"),
+            Timeout = TimeSpan.FromSeconds(4)
+        };
         if (!string.IsNullOrWhiteSpace(options.FrpsDashboardUser))
         {
             var value = Convert.ToBase64String(Encoding.UTF8.GetBytes(
                 $"{options.FrpsDashboardUser}:{options.FrpsDashboardPassword}"));
-            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", value);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", value);
         }
+        return client;
     }
 
     public async Task<bool> IsReachableAsync(CancellationToken cancellationToken)
@@ -117,6 +139,15 @@ public sealed class FrpsManager
         }
         return await RunAsync("sudo", ["/usr/bin/systemctl", action, _options.FrpsServiceName], TimeSpan.FromSeconds(20));
     }
+
+    public bool IsInstalled =>
+        File.Exists(_options.FrpsBinaryPath) && File.Exists(_options.FrpsConfigPath);
+
+    public Task<(int ExitCode, string Output)> InstallAsync() =>
+        RunAsync("sudo", ["/usr/local/sbin/zrfrp-install-frps"], TimeSpan.FromMinutes(3));
+
+    public Task<(int ExitCode, string Output)> ScheduleServerUpdateAsync() =>
+        RunAsync("sudo", ["/usr/local/sbin/zrfrp-update-server"], TimeSpan.FromSeconds(20));
 
     private static async Task<(int ExitCode, string Output)> RunAsync(
         string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)

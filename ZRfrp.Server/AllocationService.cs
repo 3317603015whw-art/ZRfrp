@@ -18,7 +18,7 @@ public sealed class AllocationService
     }
 
     public async Task<(AllocationResponse? Result, string? Error)> AllocateAsync(
-        AllocationRequest request, CancellationToken cancellationToken)
+        AllocationRequest request, CancellationToken cancellationToken, UserAccount? account = null)
     {
         if (string.IsNullOrWhiteSpace(request.ClientId)
             || string.IsNullOrWhiteSpace(request.TunnelId)
@@ -43,7 +43,8 @@ public sealed class AllocationService
         try
         {
             var existing = _store.State.Allocations.FirstOrDefault(item =>
-                item.ClientId == request.ClientId && item.TunnelId == request.TunnelId && item.Active);
+                item.ClientId == request.ClientId && item.TunnelId == request.TunnelId && item.Active
+                && (account is null || item.AccountId == account.Id));
             if (existing is not null)
             {
                 existing.BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant();
@@ -70,7 +71,8 @@ public sealed class AllocationService
                 ProxyName = request.ProxyName,
                 ProxyType = request.ProxyType,
                 RemotePort = port,
-                BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant()
+                BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant(),
+                AccountId = account?.Id ?? ""
             };
             _store.State.Allocations.Add(allocation);
             await _store.AuditAsync("allocate", $"{request.ClientId}/{request.ProxyName} -> {port}");

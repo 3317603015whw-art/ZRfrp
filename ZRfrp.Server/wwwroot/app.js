@@ -1,59 +1,62 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-let snapshot=null;
-const titles={overview:["节点总览","连接、流量和服务状态"],clients:["客户端","在线设备与连接信息"],tunnels:["隧道分配","服务端端口租约与限速"],config:["服务配置","安全编辑并应用 frps.toml"],security:["安全","面板访问凭据"]};
-
-async function api(path, options={}) {
+let snapshot=null, session=null, advanced=false;
+const titles={
+  overview:["主控总览","连接、流量和服务状态"],nodes:["服务节点","安装、监控和控制 frps 节点"],
+  accounts:["客户账号","账号状态与流量额度"],clients:["客户端","在线设备与连接信息"],
+  tunnels:["隧道分配","服务端端口租约与限速"],config:["服务配置","模块化配置与高级文本编辑"],
+  security:["安全","面板访问凭据"],customer:["我的用量","流量额度与账号状态"]
+};
+async function api(path,options={}){
   const response=await fetch(path,{headers:{"Content-Type":"application/json",...(options.headers||{})},...options});
   if(response.status===401){showLogin();throw new Error("登录已失效");}
-  const text=await response.text(); let body={};
-  try{body=text?JSON.parse(text):{}}catch{body={error:text}}
-  if(!response.ok)throw new Error(body.error||`请求失败 (${response.status})`);
-  return body;
+  const text=await response.text();let body={};try{body=text?JSON.parse(text):{}}catch{body={error:text}}
+  if(!response.ok)throw new Error(body.error||`请求失败 (${response.status})`);return body;
 }
-function showLogin(){ $("#app").classList.add("hidden");$("#login").classList.remove("hidden"); }
-function showApp(){ $("#login").classList.add("hidden");$("#app").classList.remove("hidden"); }
-function toast(message){const box=$("#toast");box.textContent=message;box.classList.add("show");setTimeout(()=>box.classList.remove("show"),2200)}
-function pick(object,...keys){for(const key of keys){if(object&&object[key]!=null)return object[key]}return 0}
-function arrayFrom(value){if(Array.isArray(value))return value;if(Array.isArray(value?.clients))return value.clients;if(Array.isArray(value?.proxies))return value.proxies;return []}
-function fmtBytes(value){let n=Number(value||0);for(const unit of ["B","KB","MB","GB","TB"]){if(n<1024||unit==="TB")return `${n<10&&unit!=="B"?n.toFixed(1):Math.round(n)} ${unit}`;n/=1024}}
+function showLogin(){$("#app").classList.add("hidden");$("#login").classList.remove("hidden")}
+function showApp(role){$("#login").classList.add("hidden");$("#app").classList.remove("hidden");$$(".admin-only").forEach(x=>x.classList.toggle("hidden",role!=="admin"));$$(".customer-only").forEach(x=>x.classList.toggle("hidden",role!=="customer"));openPage(role==="admin"?"overview":"customer")}
+function openPage(page){$$(".nav,.page").forEach(x=>x.classList.remove("active"));const nav=$(`.nav[data-page="${page}"]`);if(nav)nav.classList.add("active");$("#page-"+page).classList.add("active");[$("#page-title").textContent,$("#page-subtitle").textContent]=titles[page];if(page==="config")loadConfigModel();if(page==="accounts")loadAccounts();if(page==="customer")loadCustomer();if(page==="nodes")loadNodes()}
+function toast(message){const box=$("#toast");box.textContent=message;box.classList.add("show");setTimeout(()=>box.classList.remove("show"),2400)}
+function pick(object,...keys){for(const key of keys)if(object&&object[key]!=null)return object[key];return 0}
+function arrayFrom(value){if(Array.isArray(value))return value;if(Array.isArray(value?.clients))return value.clients;if(Array.isArray(value?.proxies))return value.proxies;return[]}
+function fmtBytes(value){let n=Number(value||0);if(value===-1)return"不限";for(const unit of["B","KB","MB","GB","TB"]){if(n<1024||unit==="TB")return`${n<10&&unit!=="B"?n.toFixed(1):Math.round(n)} ${unit}`;n/=1024}}
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]))}
-
+function emptyRow(columns,text){return`<tr><td class="empty" colspan="${columns}">${text}</td></tr>`}
 async function refresh(){
-  try{
-    snapshot=await api("/api/overview");
-    render(snapshot);
-    $("#updated").textContent=new Date().toLocaleTimeString()+" 更新";
-  }catch(error){toast(error.message)}
+  if(!session?.authenticated)return;
+  if(session.role==="customer"){await loadCustomer();return}
+  try{snapshot=await api("/api/overview");renderOverview(snapshot);$("#updated").textContent=new Date().toLocaleTimeString()+" 更新"}catch(error){toast(error.message)}
 }
-function render(data){
-  $("#node-health").className=`health ${data.reachable?"online":"offline"}`;
-  $("#node-health").innerHTML=`<i></i>${data.reachable?"节点在线":"节点离线"}`;
-  const clients=arrayFrom(data.clients);
-  const proxyGroups=Object.values(data.proxies||{}).flatMap(arrayFrom);
-  const server=data.server||{};
+function renderOverview(data){
+  $("#node-health").className=`health ${data.reachable?"online":"offline"}`;$("#node-health").innerHTML=`<i></i>${data.reachable?"节点在线":"节点离线"}`;
+  const clients=arrayFrom(data.clients),groups=Object.values(data.proxies||{}).flatMap(arrayFrom),server=data.server||{};
   $("#metric-clients").textContent=pick(server,"clientCounts","client_count")||clients.filter(x=>x.status!=="offline").length;
-  $("#metric-proxies").textContent=pick(server,"proxyCount","proxy_count")||proxyGroups.length||data.allocations?.length||0;
-  $("#metric-in").textContent=fmtBytes(pick(server,"totalTrafficIn","total_traffic_in"));
-  $("#metric-out").textContent=fmtBytes(pick(server,"totalTrafficOut","total_traffic_out"));
-  $("#server-info").innerHTML=[
-    ["运行状态",data.reachable?"正常":"不可用"],["frps 版本",pick(server,"version")||"未知"],
-    ["绑定端口",pick(server,"bindPort","bind_port")||"7000"],["运行时间",pick(server,"uptime")||"等待数据"]
-  ].map(([a,b])=>`<div class="detail"><span>${a}</span><strong>${escapeHtml(b)}</strong></div>`).join("");
+  $("#metric-proxies").textContent=pick(server,"proxyCount","proxy_count")||groups.length||data.allocations?.length||0;
+  $("#metric-in").textContent=fmtBytes(pick(server,"totalTrafficIn","total_traffic_in"));$("#metric-out").textContent=fmtBytes(pick(server,"totalTrafficOut","total_traffic_out"));
+  $("#server-info").innerHTML=[["运行状态",data.reachable?"正常":"不可用"],["frps 版本",pick(server,"version")||"未知"],["绑定端口",pick(server,"bindPort","bind_port")||"7000"],["运行时间",pick(server,"uptime")||"等待数据"]].map(([a,b])=>`<div class="detail"><span>${a}</span><strong>${escapeHtml(b)}</strong></div>`).join("");
   $("#audit-list").innerHTML=(data.audit||[]).map(x=>`<div class="activity"><b>${escapeHtml(x.action)}</b><span>${new Date(x.time).toLocaleString()} · ${escapeHtml(x.detail)}</span></div>`).join("")||`<div class="empty">暂无操作记录</div>`;
   $("#clients-body").innerHTML=clients.map(x=>`<tr><td><strong>${escapeHtml(pick(x,"clientID","clientId","id","user")||"未命名")}</strong></td><td>${escapeHtml(pick(x,"clientAddress","client_address","address")||"—")}</td><td><span class="tag ${x.status==="offline"?"off":""}">${escapeHtml(x.status||"online")}</span></td><td>${escapeHtml(x.protocol||x.version||"—")}</td><td>${escapeHtml(pick(x,"connectTime","connect_time","lastSeen")||"—")}</td></tr>`).join("")||emptyRow(5,"暂无已连接客户端");
   $("#allocations-body").innerHTML=(data.allocations||[]).map(x=>`<tr><td><strong>${escapeHtml(x.proxyName)}</strong></td><td>${escapeHtml(x.clientId)}</td><td>${escapeHtml(x.proxyType.toUpperCase())}</td><td>${x.remotePort}</td><td>${escapeHtml(x.bandwidthLimit||"不限速")}</td><td><span class="tag">已锁定</span></td><td><button class="danger release" data-id="${x.id}">释放</button></td></tr>`).join("")||emptyRow(7,"暂无端口租约");
-  $$(".release").forEach(button=>button.onclick=async()=>{if(!confirm("释放该端口租约？客户端下次连接将被拒绝。"))return;try{await api(`/api/allocations/${button.dataset.id}`,{method:"DELETE"});toast("租约已释放");refresh()}catch(e){toast(e.message)}});
+  $$(".release").forEach(button=>button.onclick=async()=>{try{await api(`/api/allocations/${button.dataset.id}`,{method:"DELETE"});toast("租约已释放");refresh()}catch(e){toast(e.message)}});
 }
-function emptyRow(columns,text){return `<tr><td class="empty" colspan="${columns}">${text}</td></tr>`}
-async function loadConfig(){try{const result=await api("/api/config");$("#config-editor").value=result.content||""}catch(e){toast(e.message)}}
+async function loadAccounts(){try{const rows=await api("/api/admin/accounts");$("#accounts-body").innerHTML=rows.filter(x=>x.role==="customer").map(x=>`<tr><td><strong>${escapeHtml(x.username)}</strong></td><td><span class="tag ${x.enabled?"":"off"}">${x.enabled?"启用":"停用"}</span></td><td>${fmtBytes(x.trafficUsedBytes)}</td><td><input class="quota-edit" data-id="${x.id}" data-enabled="${x.enabled}" type="number" min="0" value="${x.trafficQuotaBytes?Math.round(x.trafficQuotaBytes/1024**3):0}" title="GB，0 为不限"></td><td>${new Date(x.createdAt).toLocaleDateString()}</td><td><button class="quota-save" data-id="${x.id}">保存额度</button> <button class="traffic-reset" data-id="${x.id}">清零</button> <button class="account-toggle" data-id="${x.id}" data-enabled="${x.enabled}" data-quota="${x.trafficQuotaBytes}">${x.enabled?"停用":"启用"}</button></td></tr>`).join("")||emptyRow(6,"暂无客户账号");$$(".account-toggle").forEach(b=>b.onclick=()=>toggleAccount(b));$$(".quota-save").forEach(b=>b.onclick=()=>saveQuota(b));$$(".traffic-reset").forEach(b=>b.onclick=async()=>{try{await api(`/api/admin/accounts/${b.dataset.id}/reset-traffic`,{method:"POST"});toast("流量已清零");loadAccounts()}catch(e){toast(e.message)}})}catch(e){toast(e.message)}}
+async function saveQuota(button){const input=$(`.quota-edit[data-id="${button.dataset.id}"]`);try{await api(`/api/admin/accounts/${button.dataset.id}`,{method:"PUT",body:JSON.stringify({username:"",password:"",role:"customer",trafficQuotaBytes:Number(input.value||0)*1024**3,enabled:input.dataset.enabled==="true"})});toast("流量额度已更新");loadAccounts()}catch(e){toast(e.message)}}
+async function toggleAccount(button){try{await api(`/api/admin/accounts/${button.dataset.id}`,{method:"PUT",body:JSON.stringify({username:"",password:"",role:"customer",trafficQuotaBytes:Number(button.dataset.quota),enabled:button.dataset.enabled!=="true"})});loadAccounts()}catch(e){toast(e.message)}}
+async function loadCustomer(){try{const me=await api("/api/customer/me");$("#customer-used").textContent=fmtBytes(me.trafficUsedBytes);$("#customer-quota").textContent=me.trafficQuotaBytes?fmtBytes(me.trafficQuotaBytes):"不限";$("#customer-remaining").textContent=fmtBytes(me.remainingBytes);$("#customer-info").innerHTML=`<div class="detail"><span>账号</span><strong>${escapeHtml(me.username)}</strong></div><div class="detail"><span>账号 ID</span><strong>${escapeHtml(me.id)}</strong></div>`;$("#node-health").className="health online";$("#node-health").innerHTML="<i></i>账号正常"}catch(e){toast(e.message)}}
+async function loadNodes(){try{const status=await api("/api/frps/install-status"),nodes=await api("/api/admin/nodes");$("#install-status").textContent=status.installed?"本机 frps 已安装，可由主控面板管理。":"本机尚未安装 frps，可点击右上角自动部署。";const d=snapshot||await api("/api/overview");const local=`<tr><td><strong>本机节点</strong></td><td>当前服务器</td><td><span class="tag ${d.reachable?"":"off"}">${d.reachable?"在线":"离线"}</span></td><td>${$("#metric-clients").textContent}</td><td>${$("#metric-proxies").textContent}</td><td>刚刚</td><td>本机</td></tr>`;$("#nodes-body").innerHTML=local+nodes.map(n=>`<tr><td><strong>${escapeHtml(n.name)}</strong><small>${escapeHtml(n.version)}</small></td><td>${escapeHtml(n.publicHost)}:${n.frpsPort}</td><td><span class="tag ${n.online?"":"off"}">${n.online?"在线":"离线"}</span></td><td>${n.activeClients}</td><td>${n.activeProxies}</td><td>${new Date(n.lastSeen).toLocaleString()}</td><td><button class="node-restart" data-id="${n.id}">重启</button></td></tr>`).join("");$$(".node-restart").forEach(b=>b.onclick=async()=>{try{const r=await api(`/api/admin/nodes/${b.dataset.id}/service/restart`,{method:"POST"});toast(r.message)}catch(e){toast(e.message)}})}catch(e){toast(e.message)}}
+async function loadConfigModel(){advanced=false;$("#config-form").classList.remove("hidden");$("#config-editor").classList.add("hidden");$("#advanced-config").textContent="高级文本编辑";try{const m=await api("/api/config/model");const map={BindAddress:"bindAddress",BindPort:"bindPort",AuthToken:"authToken",DashboardAddress:"dashboardAddress",DashboardPort:"dashboardPort",DashboardUser:"dashboardUser",DashboardPassword:"dashboardPassword",PortStart:"portRangeStart",PortEnd:"portRangeEnd",LogLevel:"logLevel",LogDays:"logMaxDays"};for(const[id,key]of Object.entries(map))$(`#cfg-${id.replace(/[A-Z]/g,c=>"-"+c.toLowerCase()).replace(/^-/,"")}`).value=m[key]??"";$("#cfg-prometheus").checked=m.enablePrometheus}catch(e){toast(e.message)}}
+function configPayload(){return{bindAddress:$("#cfg-bind-address").value,bindPort:Number($("#cfg-bind-port").value),authToken:$("#cfg-auth-token").value,dashboardAddress:$("#cfg-dashboard-address").value,dashboardPort:Number($("#cfg-dashboard-port").value),dashboardUser:$("#cfg-dashboard-user").value,dashboardPassword:$("#cfg-dashboard-password").value,portRangeStart:Number($("#cfg-port-start").value),portRangeEnd:Number($("#cfg-port-end").value),enablePrometheus:$("#cfg-prometheus").checked,logLevel:$("#cfg-log-level").value,logMaxDays:Number($("#cfg-log-days").value)}}
+async function checkUpdate(){try{const u=await api("/api/update");$("#version-button").textContent=`v${u.currentVersion}${u.updateAvailable?" · 可更新":""}`;$("#version-button").dataset.available=u.updateAvailable}catch{}}
 
-$("#login-form").onsubmit=async event=>{event.preventDefault();$("#login-error").textContent="";try{await api("/api/auth/login",{method:"POST",body:JSON.stringify({password:$("#password").value})});$("#password").value="";showApp();refresh()}catch(error){$("#login-error").textContent=error.message}};
-$("#logout").onclick=async()=>{await api("/api/auth/logout",{method:"POST"});showLogin()};
-$("#refresh").onclick=refresh;
-$$(".nav").forEach(button=>button.onclick=()=>{$$(".nav,.page").forEach(x=>x.classList.remove("active"));button.classList.add("active");const page=button.dataset.page;$("#page-"+page).classList.add("active");[$("#page-title").textContent,$("#page-subtitle").textContent]=titles[page];if(page==="config")loadConfig();});
+$("#login-form").onsubmit=async e=>{e.preventDefault();$("#login-error").textContent="";try{session=await api("/api/auth/login",{method:"POST",body:JSON.stringify({username:$("#username").value,password:$("#password").value})});session.authenticated=true;$("#password").value="";showApp(session.role);refresh();checkUpdate()}catch(error){$("#login-error").textContent=error.message}};
+$("#logout").onclick=async()=>{await api("/api/auth/logout",{method:"POST"});session=null;showLogin()};
+$("#refresh").onclick=refresh;$$(".nav").forEach(button=>button.onclick=()=>openPage(button.dataset.page));
 $$("[data-service]").forEach(button=>button.onclick=async()=>{try{const result=await api(`/api/service/${button.dataset.service}`,{method:"POST"});toast(result.message);setTimeout(refresh,900)}catch(e){toast(e.message)}});
-$("#save-config").onclick=async()=>{const status=$("#config-status");status.textContent="正在校验...";try{const result=await api("/api/config",{method:"PUT",body:JSON.stringify({content:$("#config-editor").value,restart:$("#restart-after-save").checked})});status.textContent=result.message;toast(result.message);refresh()}catch(e){status.textContent=e.message;toast(e.message)}};
-$("#password-form").onsubmit=async event=>{event.preventDefault();try{await api("/api/admin/password",{method:"POST",body:JSON.stringify({currentPassword:$("#current-password").value,newPassword:$("#new-password").value})});$("#password-status").textContent="密码已更新";event.target.reset()}catch(e){$("#password-status").textContent=e.message}};
-
-(async()=>{try{const session=await api("/api/session");if(session.authenticated){showApp();await refresh()}else showLogin()}catch{showLogin()}})();
-setInterval(()=>{if(!$("#app").classList.contains("hidden"))refresh()},10000);
+$("#new-account").onclick=()=>$("#account-form").classList.toggle("hidden");
+$("#account-form").onsubmit=async e=>{e.preventDefault();try{await api("/api/admin/accounts",{method:"POST",body:JSON.stringify({username:$("#account-name").value,password:$("#account-password").value,role:"customer",trafficQuotaBytes:Number($("#account-quota").value||0)*1024**3,enabled:true})});e.target.reset();e.target.classList.add("hidden");toast("客户账号已创建");loadAccounts()}catch(error){toast(error.message)}};
+$("#install-frps").onclick=async()=>{try{$("#install-status").textContent="正在下载并部署 frps...";const r=await api("/api/frps/install",{method:"POST"});toast(r.message);loadNodes()}catch(e){$("#install-status").textContent=e.message;toast(e.message)}};
+$("#advanced-config").onclick=async()=>{advanced=!advanced;$("#config-form").classList.toggle("hidden",advanced);$("#config-editor").classList.toggle("hidden",!advanced);$("#advanced-config").textContent=advanced?"返回模块化配置":"高级文本编辑";if(advanced){const r=await api("/api/config");$("#config-editor").value=r.content||""}};
+$("#save-config").onclick=async()=>{const status=$("#config-status");status.textContent="正在校验...";try{const r=advanced?await api("/api/config",{method:"PUT",body:JSON.stringify({content:$("#config-editor").value,restart:true})}):await api("/api/config/model",{method:"PUT",body:JSON.stringify(configPayload())});status.textContent=r.message;toast(r.message)}catch(e){status.textContent=e.message;toast(e.message)}};
+$("#password-form").onsubmit=async e=>{e.preventDefault();try{await api("/api/admin/password",{method:"POST",body:JSON.stringify({currentPassword:$("#current-password").value,newPassword:$("#new-password").value})});$("#password-status").textContent="密码已更新";e.target.reset()}catch(error){$("#password-status").textContent=error.message}};
+$("#version-button").onclick=async()=>{if($("#version-button").dataset.available!=="true"){checkUpdate();return}try{const r=await api("/api/update",{method:"POST"});toast(r.message)}catch(e){toast(e.message)}};
+(async()=>{try{session=await api("/api/session");if(session.authenticated&&["admin","customer"].includes(session.role)){showApp(session.role);refresh();checkUpdate()}else showLogin()}catch{showLogin()}})();
+setInterval(()=>{if(session?.authenticated)refresh()},10000);

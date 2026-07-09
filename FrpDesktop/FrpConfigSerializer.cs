@@ -11,7 +11,15 @@ public static class FrpConfigSerializer
         builder.AppendLine($"serverAddr = {Quote(profile.ServerAddr)}");
         builder.AppendLine($"serverPort = {profile.ServerPort.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"clientID = {Quote(profile.Id)}");
+        if (!string.IsNullOrWhiteSpace(profile.AccountId))
+        {
+            builder.AppendLine($"user = {Quote(profile.AccountId)}");
+        }
         builder.AppendLine($"metadatas.zrfrp_client_id = {Quote(profile.Id)}");
+        if (!string.IsNullOrWhiteSpace(profile.AccountAccessToken))
+        {
+            builder.AppendLine($"metadatas.zrfrp_access_token = {Quote(profile.AccountAccessToken)}");
+        }
 
         if (!string.IsNullOrWhiteSpace(profile.Token))
         {

@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private readonly AppSettingsStore _store = new();
     private readonly FrpProcessRunner _runner = new();
     private readonly ZRfrpControlClient _controlClient = new();
+    private readonly DesktopUpdateService _updateService = new();
     private readonly StringBuilder _logBuffer = new();
     private readonly FrpEnvironmentService _environmentService;
     private readonly HashSet<string> _announcedProxyAddresses = new(StringComparer.OrdinalIgnoreCase);
@@ -58,6 +59,7 @@ public partial class MainWindow : Window
     private bool _isReallyExiting;
     private bool _trayDisposed;
     private bool _isLoadingAppSettings;
+    private DesktopUpdateInfo? _desktopUpdate;
     private Window? _floatingPanelWindow;
     private FrameworkElement? _floatingPanelContent;
     private FrameworkElement? _draggingFloatingPanel;
@@ -76,7 +78,7 @@ public partial class MainWindow : Window
         _runner.RunningChanged += running => Dispatcher.BeginInvoke(new Action(() => UpdateRunningState(running)));
     }
 
-    private void Window_Loaded(object sender, RoutedEventArgs e)
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         _state = _store.Load();
         ApplyNetworkProxySettings();
@@ -96,6 +98,7 @@ public partial class MainWindow : Window
         AppendLog("管理器已就绪。");
         UpdateRunningState(false);
         _ = TestAllProfilesLatencyAsync();
+        await CheckDesktopUpdateAsync(showNotification: true);
     }
 
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -483,6 +486,11 @@ public partial class MainWindow : Window
 
         try
         {
+            if (string.IsNullOrWhiteSpace(profile.AccountAccessToken)
+                || profile.AccountTokenExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(1))
+            {
+                throw new InvalidOperationException("请先在软件设置中登录控制平台账号。");
+            }
             ValidateProfile(profile);
             var configPath = _store.GetGeneratedConfigPath(profile);
             File.WriteAllText(configPath, FrpConfigSerializer.ToToml(profile), Utf8NoBom);
@@ -587,10 +595,113 @@ public partial class MainWindow : Window
         NetworkProxyPortTextBox.Text = _state.NetworkProxyPort > 0 ? _state.NetworkProxyPort.ToString() : "";
         NetworkProxyUsernameTextBox.Text = _state.NetworkProxyUsername;
         NetworkProxyPasswordBox.Password = _state.NetworkProxyPassword;
+        PlatformUrlTextBox.Text = _state.PlatformUrl;
+        AccountUsernameTextBox.Text = _state.AccountUsername;
+        AccountPasswordBox.Password = "";
+        UpdateAccountStatus();
         UpdateNetworkProxyControls();
         _isLoadingAppSettings = false;
         ShowOverlayPanel(AppSettingsDialogPanel);
         await DetectFrpcEnvironmentAsync();
+    }
+
+    private async void AccountLoginButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var platformUrl = PlatformUrlTextBox.Text.Trim();
+            var username = AccountUsernameTextBox.Text.Trim();
+            var session = await _controlClient.LoginAsync(
+                platformUrl, username, AccountPasswordBox.Password, Environment.MachineName);
+            _state.PlatformUrl = platformUrl;
+            _state.AccountUsername = session.Username;
+            var target = _selectedProfile ?? _state.Profiles.First();
+            target.ServerManaged = true;
+            target.ControlApiUrl = platformUrl;
+            target.ServerAddr = session.ServerAddress;
+            target.ServerPort = session.ServerPort;
+            target.Token = session.FrpToken;
+            foreach (var profile in _state.Profiles.Where(item => item.ServerManaged))
+            {
+                profile.AccountId = session.AccountId;
+                profile.AccountAccessToken = session.AccessToken;
+                profile.AccountTokenExpiresAt = session.ExpiresAt;
+                profile.Token = session.FrpToken;
+                if (string.IsNullOrWhiteSpace(profile.ControlApiUrl))
+                {
+                    profile.ControlApiUrl = platformUrl;
+                }
+            }
+            AccountPasswordBox.Password = "";
+            SaveState();
+            UpdateAccountStatus();
+            AppendLog($"控制平台账号“{session.Username}”登录成功。");
+        }
+        catch (Exception exception)
+        {
+            AccountStatusText.Text = exception.Message;
+            AccountStatusText.Foreground = LogWarningBrush;
+        }
+    }
+
+    private void UpdateAccountStatus()
+    {
+        var profile = _state.Profiles.FirstOrDefault(item =>
+            !string.IsNullOrWhiteSpace(item.AccountAccessToken)
+            && item.AccountTokenExpiresAt > DateTimeOffset.UtcNow);
+        AccountStatusText.Text = profile is null
+            ? "未登录，登录后才能获取服务授权并启动连接。"
+            : $"已登录：{_state.AccountUsername}，授权有效至 {profile.AccountTokenExpiresAt.LocalDateTime:g}";
+        AccountStatusText.Foreground = profile is null ? LogWarningBrush : LogSuccessBrush;
+    }
+
+    private async Task CheckDesktopUpdateAsync(bool showNotification)
+    {
+        try
+        {
+            _desktopUpdate = await _updateService.CheckAsync();
+            VersionButton.Content = _desktopUpdate.UpdateAvailable
+                ? $"ZRfrp v{_desktopUpdate.CurrentVersion} · 可更新"
+                : $"ZRfrp v{_desktopUpdate.CurrentVersion}";
+            if (_desktopUpdate.UpdateAvailable && showNotification)
+            {
+                ShowToast($"发现新版本 v{_desktopUpdate.LatestVersion}，点击左下角版本号更新。");
+            }
+        }
+        catch
+        {
+            VersionButton.Content = $"ZRfrp v{DesktopUpdateService.CurrentVersion}";
+        }
+    }
+
+    private async void VersionButton_Click(object sender, RoutedEventArgs e)
+    {
+        await CheckDesktopUpdateAsync(showNotification: false);
+        if (_desktopUpdate?.UpdateAvailable != true)
+        {
+            ShowToast("当前已是最新版本。");
+            return;
+        }
+        if (!await ShowConfirmAsync(
+                "更新 ZRfrp",
+                $"下载并安装 v{_desktopUpdate.LatestVersion}？软件会停止当前连接并重新启动。"))
+        {
+            return;
+        }
+        try
+        {
+            if (_runner.IsRunning)
+            {
+                await StopRunnerAsync();
+            }
+            await _updateService.DownloadAndApplyAsync(_desktopUpdate, _store.AppDataDirectory);
+            _isReallyExiting = true;
+            Close();
+        }
+        catch (Exception exception)
+        {
+            await ShowConfirmAsync("更新失败", exception.Message);
+        }
     }
 
     private void CloseAppSettings_Click(object sender, RoutedEventArgs e)
@@ -1173,9 +1284,10 @@ public partial class MainWindow : Window
             {
                 throw new InvalidOperationException("请填写有效的 ZRfrp Server 控制面板地址。");
             }
-            if (string.IsNullOrWhiteSpace(profile.ControlApiKey))
+            if (string.IsNullOrWhiteSpace(profile.ControlApiKey)
+                && string.IsNullOrWhiteSpace(profile.AccountAccessToken))
             {
-                throw new InvalidOperationException("托管节点需要填写客户端 API Key。");
+                throw new InvalidOperationException("托管节点需要登录控制平台账号。");
             }
         }
     }

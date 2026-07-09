@@ -1,6 +1,6 @@
 # ZRfrp Server
 
-ZRfrp Server 是 Linux 端控制平面，包含 Web 管理面板、frps 配置管理、连接与流量概览、端口自动分配、服务端策略插件和隧道限速。
+ZRfrp Server 是 Linux 端多用户控制平面，包含管理员/客户双视图、账号与流量额度、服务节点集群、frps 一键安装、模块化配置、连接统计、端口分配和服务端限速。
 
 ## 一键安装
 
@@ -28,3 +28,22 @@ curl -fsSL https://raw.githubusercontent.com/3317603015whw-art/ZRfrp/main/ZRfrp.
 4. 保存时服务端检查节点和端口，自动分配远程端口。分配后该端口在 Desktop 中锁定。
 
 关键策略在 frps 的 `NewProxy` 插件阶段再次执行，不能通过手工修改客户端 TOML 绕过。
+
+## 账号体系
+
+- 管理员账号进入主控面板，管理客户、额度、节点和 frps 配置。
+- 客户账号进入用量面板，可查看已用、总额和剩余流量。
+- Desktop 使用客户账号登录，换取短期访问会话和 frp Token。
+- frps 插件在登录和创建隧道时校验账号及额度，额度用尽后拒绝新连接。
+
+## 主控与子节点
+
+主控首次安装时会输出 `节点 Peer Key`。子节点使用同一密钥注册：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/3317603015whw-art/ZRfrp/main/ZRfrp.Server/deploy/install.sh |
+  sudo env ZRFRP_MODE=node ZRFRP_MASTER_URL=https://master.example.com \
+  ZRFRP_MASTER_KEY=主控PeerKey ZRFRP_PEER_KEY=主控PeerKey bash
+```
+
+子节点每 15 秒向主控发送状态心跳。管理员可在节点页面查看在线情况并远程重启 frps。

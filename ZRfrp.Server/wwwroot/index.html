@@ -12,8 +12,9 @@
     <form id="login-form" class="login-panel">
       <div class="brand-mark">Frp</div>
       <h1>ZRfrp Server</h1>
-      <p>登录 Linux 节点控制台</p>
-      <label>管理员密码<input id="password" type="password" autocomplete="current-password" required></label>
+      <p>登录控制平台</p>
+      <label>账号<input id="username" autocomplete="username" required></label>
+      <label>登录密码<input id="password" type="password" autocomplete="current-password" required></label>
       <button class="primary" type="submit">进入面板</button>
       <div id="login-error" class="error"></div>
     </form>
@@ -23,14 +24,18 @@
     <aside>
       <div class="brand"><span class="brand-mark small">Frp</span><span>ZRfrp</span></div>
       <nav>
-        <button class="nav active" data-page="overview">总览</button>
-        <button class="nav" data-page="clients">客户端</button>
-        <button class="nav" data-page="tunnels">隧道分配</button>
-        <button class="nav" data-page="config">服务配置</button>
-        <button class="nav" data-page="security">安全</button>
+        <button class="nav active admin-only" data-page="overview">主控总览</button>
+        <button class="nav admin-only" data-page="nodes">服务节点</button>
+        <button class="nav admin-only" data-page="accounts">客户账号</button>
+        <button class="nav admin-only" data-page="clients">客户端</button>
+        <button class="nav admin-only" data-page="tunnels">隧道分配</button>
+        <button class="nav admin-only" data-page="config">服务配置</button>
+        <button class="nav admin-only" data-page="security">安全</button>
+        <button class="nav customer-only" data-page="customer">我的用量</button>
       </nav>
       <div class="aside-foot">
         <span id="node-health" class="health"><i></i>检测中</span>
+        <button id="version-button" class="quiet">v2.0.0</button>
         <button id="logout" class="quiet">退出登录</button>
       </div>
     </aside>
@@ -73,6 +78,27 @@
         </section>
       </section>
 
+      <section id="page-nodes" class="page">
+        <section class="panel full"><div class="panel-head"><div><h2>服务端节点</h2><p>主控服务端统一监控和管理全部 frps 节点</p></div>
+          <button id="install-frps" class="primary">一键安装本机 frps</button></div>
+          <div id="install-status" class="notice"></div>
+          <div class="table-wrap"><table><thead><tr><th>节点</th><th>公网地址</th><th>状态</th><th>客户端</th><th>隧道</th><th>最后心跳</th><th></th></tr></thead><tbody id="nodes-body"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="page-accounts" class="page">
+        <section class="panel full">
+          <div class="panel-head"><div><h2>客户账号</h2><p>账号状态、流量额度与使用情况</p></div><button id="new-account" class="primary">新建客户</button></div>
+          <form id="account-form" class="inline-form hidden">
+            <input id="account-name" placeholder="用户名" required>
+            <input id="account-password" type="password" placeholder="初始密码（至少 8 位）" required>
+            <input id="account-quota" type="number" min="0" placeholder="流量额度 GB，0 为不限">
+            <button class="primary" type="submit">创建</button>
+          </form>
+          <div class="table-wrap"><table><thead><tr><th>账号</th><th>状态</th><th>已用流量</th><th>额度</th><th>创建时间</th><th></th></tr></thead><tbody id="accounts-body"></tbody></table></div>
+        </section>
+      </section>
+
       <section id="page-tunnels" class="page">
         <section class="panel full"><div class="panel-head"><div><h2>端口租约</h2><p>由服务端统一分配并在 frps 插件层强制执行</p></div></div>
           <div class="table-wrap"><table><thead><tr><th>隧道</th><th>客户端</th><th>类型</th><th>远程端口</th><th>带宽限制</th><th>状态</th><th></th></tr></thead><tbody id="allocations-body"></tbody></table></div>
@@ -81,12 +107,35 @@
 
       <section id="page-config" class="page">
         <section class="panel full editor-panel">
-          <div class="panel-head"><div><h2>frps.toml</h2><p>保存前自动调用 frps 校验，并保留上一份备份</p></div>
-            <label class="switch-label"><input id="restart-after-save" type="checkbox" checked><span></span>保存后重启</label>
+          <div class="panel-head"><div><h2>服务配置</h2><p>模块化修改常用参数，保存后自动校验并重启</p></div>
+            <button id="advanced-config">高级文本编辑</button>
           </div>
-          <textarea id="config-editor" spellcheck="false"></textarea>
+          <form id="config-form" class="config-grid">
+            <label>frps 监听地址<input id="cfg-bind-address"></label>
+            <label>frps 监听端口<input id="cfg-bind-port" type="number"></label>
+            <label class="wide">认证 Token<input id="cfg-auth-token" type="password"></label>
+            <label>Dashboard 地址<input id="cfg-dashboard-address"></label>
+            <label>Dashboard 端口<input id="cfg-dashboard-port" type="number"></label>
+            <label>Dashboard 用户名<input id="cfg-dashboard-user"></label>
+            <label>Dashboard 密码<input id="cfg-dashboard-password" type="password"></label>
+            <label>分配端口起点<input id="cfg-port-start" type="number"></label>
+            <label>分配端口终点<input id="cfg-port-end" type="number"></label>
+            <label>日志等级<select id="cfg-log-level"><option>trace</option><option>debug</option><option selected>info</option><option>warn</option><option>error</option></select></label>
+            <label>日志保留天数<input id="cfg-log-days" type="number"></label>
+            <label class="switch-label"><input id="cfg-prometheus" type="checkbox"><span></span>Prometheus</label>
+          </form>
+          <textarea id="config-editor" class="hidden" spellcheck="false"></textarea>
           <div class="editor-actions"><span id="config-status"></span><button id="save-config" class="primary">校验并保存</button></div>
         </section>
+      </section>
+
+      <section id="page-customer" class="page">
+        <div class="metrics customer-metrics">
+          <article><span>已使用流量</span><strong id="customer-used">0 B</strong><small>账号累计使用</small></article>
+          <article><span>流量额度</span><strong id="customer-quota">不限</strong><small>由管理员分配</small></article>
+          <article><span>剩余流量</span><strong id="customer-remaining">不限</strong><small>额度用尽后停止连接</small></article>
+        </div>
+        <section class="panel compact"><div class="panel-head"><div><h2>账号信息</h2><p>当前登录的 ZRfrp 客户账号</p></div></div><div id="customer-info" class="details"></div></section>
       </section>
 
       <section id="page-security" class="page">

@@ -40,4 +40,21 @@ public static class Security
             return false;
         }
     }
+
+    public static string HashToken(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    public static bool VerifyToken(string value, string encoded)
+    {
+        try
+        {
+            var expected = Convert.FromHexString(encoded);
+            var actual = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+            return CryptographicOperations.FixedTimeEquals(actual, expected);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 }
