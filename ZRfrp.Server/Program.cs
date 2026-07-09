@@ -6,7 +6,11 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Json;
 using ZRfrp.Server;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory
+});
 var options = builder.Configuration.GetSection("ZRfrp").Get<ServerOptions>() ?? new();
 var dataProtectionDirectory = Path.Combine(options.DataDirectory, "keys");
 Directory.CreateDirectory(dataProtectionDirectory);

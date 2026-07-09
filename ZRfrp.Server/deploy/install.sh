@@ -112,8 +112,10 @@ chmod 0640 /opt/zrfrp/server/appsettings.Production.json
 
 if [[ -n "${ZRFRP_RESET_ADMIN_PASSWORD:-}" ]]; then
   systemctl stop zrfrp-server 2>/dev/null || true
-  sudo -u zrfrp /opt/zrfrp/server/zrfrp-server \
-    --reset-admin "${ZRFRP_RESET_ADMIN_PASSWORD}"
+  (
+    cd /opt/zrfrp/server
+    sudo -u zrfrp ./zrfrp-server --reset-admin "${ZRFRP_RESET_ADMIN_PASSWORD}"
+  )
 fi
 
 systemctl daemon-reload
