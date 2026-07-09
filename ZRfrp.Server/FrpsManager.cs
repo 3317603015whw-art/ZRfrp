@@ -137,7 +137,21 @@ public sealed class FrpsManager
         {
             return (-1, "不支持的服务操作。");
         }
-        return await RunAsync("sudo", ["/usr/bin/systemctl", action, _options.FrpsServiceName], TimeSpan.FromSeconds(20));
+        var result = await RunAsync("sudo", ["/usr/bin/systemctl", action, _options.FrpsServiceName], TimeSpan.FromSeconds(20));
+        if (result.ExitCode != 0 || action == "stop")
+        {
+            return result;
+        }
+
+        await Task.Delay(900);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        if (await IsReachableAsync(timeout.Token))
+        {
+            return result;
+        }
+
+        var status = await GetInstallStatusAsync(CancellationToken.None);
+        return (-1, $"frps 服务命令已执行，但控制端口仍不可连接：{status.Message}");
     }
 
     public bool IsInstalled =>
@@ -156,8 +170,61 @@ public sealed class FrpsManager
     public Task<(int ExitCode, string Output)> InstallAsync() =>
         RunAsync("sudo", ["/usr/local/sbin/zrfrp-install-frps"], TimeSpan.FromMinutes(3));
 
+    public Task<(int ExitCode, string Output)> RepairAsync() =>
+        RunAsync("sudo", ["/usr/local/sbin/zrfrp-repair-frps"], TimeSpan.FromMinutes(3));
+
     public Task<(int ExitCode, string Output)> ScheduleServerUpdateAsync() =>
         RunAsync("sudo", ["/usr/local/sbin/zrfrp-update-server"], TimeSpan.FromSeconds(20));
+
+    public async Task<FrpsInstallStatus> GetInstallStatusAsync(CancellationToken cancellationToken)
+    {
+        var binaryExists = File.Exists(_options.FrpsBinaryPath);
+        var configExists = File.Exists(_options.FrpsConfigPath);
+        var version = await GetInstalledVersionAsync();
+        var reachable = await IsReachableAsync(cancellationToken);
+        var service = await RunAsync("systemctl", ["is-active", _options.FrpsServiceName], TimeSpan.FromSeconds(5));
+        var writable = await RunAsync("/bin/sh", ["-lc", $"test -w {ShellQuote(Path.GetDirectoryName(_options.FrpsBinaryPath) ?? "/opt/zrfrp")}"], TimeSpan.FromSeconds(5));
+        var readOnly = await RunAsync("/bin/sh", ["-lc", $"findmnt -no OPTIONS -T {ShellQuote(_options.FrpsBinaryPath)} 2>/dev/null | tr ',' '\\n' | grep -qx ro"], TimeSpan.FromSeconds(5));
+        var message = BuildStatusMessage(binaryExists, configExists, reachable, service.Output.Trim(), writable.ExitCode == 0, readOnly.ExitCode == 0);
+        return new FrpsInstallStatus(
+            binaryExists && configExists,
+            version,
+            reachable,
+            string.IsNullOrWhiteSpace(service.Output) ? "unknown" : service.Output.Trim(),
+            binaryExists,
+            configExists,
+            writable.ExitCode == 0,
+            readOnly.ExitCode == 0,
+            message);
+    }
+
+    private static string BuildStatusMessage(
+        bool binaryExists, bool configExists, bool reachable, string serviceState, bool optWritable, bool fileSystemReadOnly)
+    {
+        if (reachable)
+        {
+            return "frps 正常运行。";
+        }
+        if (fileSystemReadOnly)
+        {
+            return "/opt/zrfrp 所在文件系统为只读，自动修复会尝试重新挂载，失败时需要检查云服务器磁盘。";
+        }
+        if (!optWritable)
+        {
+            return "/opt/zrfrp 当前不可写，自动修复会调整 systemd 沙箱和目录权限。";
+        }
+        if (!binaryExists)
+        {
+            return "未找到 frps 程序，自动修复会重新下载。";
+        }
+        if (!configExists)
+        {
+            return "未找到 frps.toml，自动修复会生成默认配置。";
+        }
+        return $"frps 控制端口不可连接，systemd 状态：{serviceState}.";
+    }
+
+    private static string ShellQuote(string value) => $"'{value.Replace("'", "'\\''")}'";
 
     private static async Task<(int ExitCode, string Output)> RunAsync(
         string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)

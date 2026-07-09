@@ -135,9 +135,11 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, Cancellat
     var httpsTask = frps.GetDashboardJsonAsync("/api/proxy/https", cancellationToken);
     var healthTask = frps.IsReachableAsync(cancellationToken);
     await Task.WhenAll(serverTask, clientsTask, tcpTask, udpTask, httpTask, httpsTask, healthTask);
+    var frpsStatus = await frps.GetInstallStatusAsync(cancellationToken);
     return Results.Ok(new
     {
         reachable = healthTask.Result,
+        frpsStatus,
         server = serverTask.Result,
         clients = clientsTask.Result,
         proxies = new { tcp = tcpTask.Result, udp = udpTask.Result, http = httpTask.Result, https = httpsTask.Result },
@@ -334,12 +336,7 @@ app.MapPut("/api/config/model", async (
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapGet("/api/frps/install-status", async (FrpsManager frps, CancellationToken cancellationToken) =>
-    Results.Ok(new
-    {
-        installed = frps.IsInstalled,
-        version = await frps.GetInstalledVersionAsync(),
-        reachable = await frps.IsReachableAsync(cancellationToken)
-    }))
+    Results.Ok(await frps.GetInstallStatusAsync(cancellationToken)))
     .RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapPost("/api/frps/install", async (FrpsManager frps, StateStore store) =>
@@ -349,6 +346,21 @@ app.MapPost("/api/frps/install", async (FrpsManager frps, StateStore store) =>
     return result.ExitCode == 0
         ? Results.Ok(new { message = "frps 已安装并启动。" })
         : Results.BadRequest(new { error = result.Output });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/frps/repair", async (FrpsManager frps, StateStore store, CancellationToken cancellationToken) =>
+{
+    var result = await frps.RepairAsync();
+    await store.AuditAsync("repair", result.Output);
+    if (result.ExitCode != 0)
+    {
+        return Results.BadRequest(new { error = result.Output });
+    }
+
+    var status = await frps.GetInstallStatusAsync(cancellationToken);
+    return status.Reachable
+        ? Results.Ok(new { message = "frps 已修复并启动。", status })
+        : Results.BadRequest(new { error = $"修复命令已完成，但 frps 仍不可连接：{status.Message}" });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapGet("/api/update", async (UpdateService updates, CancellationToken cancellationToken) =>

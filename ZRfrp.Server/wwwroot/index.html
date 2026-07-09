@@ -36,7 +36,7 @@
       </nav>
       <div class="aside-foot">
         <span id="node-health" class="health"><i></i>检测中</span>
-        <button id="version-button" class="quiet">v2.0.5</button>
+        <button id="version-button" class="quiet">v2.0.7</button>
         <button id="logout" class="quiet">退出登录</button>
       </div>
     </aside>
@@ -61,7 +61,7 @@
           <section class="panel">
             <div class="panel-head"><div><h2>服务状态</h2><p>本机 frps 进程与控制端口</p></div>
               <div class="service-actions">
-                <button data-service="start">启动</button><button data-service="restart">重启</button><button class="danger" data-service="stop">停止</button>
+                <button id="repair-frps" class="primary">修复 frps</button><button data-service="start">启动</button><button data-service="restart">重启</button><button class="danger" data-service="stop">停止</button>
               </div>
             </div>
             <div id="server-info" class="details"></div>
@@ -81,7 +81,7 @@
 
       <section id="page-nodes" class="page">
         <section class="panel full"><div class="panel-head"><div><h2>服务端节点</h2><p>主控服务端统一监控和管理全部 frps 节点</p></div>
-          <button id="install-frps" class="primary">一键安装本机 frps</button></div>
+          <button id="install-frps" class="primary">一键修复本机 frps</button></div>
           <div id="install-status" class="notice"></div>
           <div class="table-wrap"><table><thead><tr><th>节点</th><th>公网地址</th><th>状态</th><th>客户端</th><th>隧道</th><th>最后心跳</th><th></th></tr></thead><tbody id="nodes-body"></tbody></table></div>
         </section>
@@ -173,11 +173,13 @@
               <div class="detail"><span>安装状态</span><strong id="frps-installed">检测中</strong></div>
               <div class="detail"><span>frps 版本</span><strong id="frps-version">—</strong></div>
               <div class="detail"><span>服务连接</span><strong id="frps-reachable">—</strong></div>
+              <div class="detail"><span>systemd 状态</span><strong id="frps-service-state">—</strong></div>
+              <div class="detail"><span>/opt/zrfrp 写入</span><strong id="frps-opt-writable">—</strong></div>
               <div class="detail"><span>默认路径</span><strong>/opt/zrfrp/frps</strong></div>
             </div>
             <div class="maintenance-actions">
               <button id="detect-frps">重新检测</button>
-              <button id="maintenance-install-frps" class="primary">安装或修复 frps</button>
+              <button id="maintenance-install-frps" class="primary">自动修复 frps</button>
             </div>
             <p id="maintenance-frps-status" class="notice"></p>
           </section>

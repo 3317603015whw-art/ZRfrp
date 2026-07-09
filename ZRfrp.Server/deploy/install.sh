@@ -75,7 +75,7 @@ if [[ -z "${SUDO_PATH}" ]]; then
   exit 1
 fi
 cat >/etc/sudoers.d/zrfrp <<EOF
-zrfrp ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} start zrfrp-frps, ${SYSTEMCTL_PATH} stop zrfrp-frps, ${SYSTEMCTL_PATH} restart zrfrp-frps, /usr/local/sbin/zrfrp-install-frps, /usr/local/sbin/zrfrp-update-server
+zrfrp ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} start zrfrp-frps, ${SYSTEMCTL_PATH} stop zrfrp-frps, ${SYSTEMCTL_PATH} restart zrfrp-frps, /usr/local/sbin/zrfrp-install-frps, /usr/local/sbin/zrfrp-repair-frps, /usr/local/sbin/zrfrp-update-server
 EOF
 chmod 0440 /etc/sudoers.d/zrfrp
 
@@ -103,11 +103,13 @@ fi
 cp /opt/zrfrp/server/deploy/zrfrp-server.service /etc/systemd/system/
 cp /opt/zrfrp/server/deploy/zrfrp-frps.service /etc/systemd/system/
 install -m 0755 /opt/zrfrp/server/deploy/install-frps.sh /usr/local/sbin/zrfrp-install-frps
+install -m 0755 /opt/zrfrp/server/deploy/repair-frps.sh /usr/local/sbin/zrfrp-repair-frps
 install -m 0755 /opt/zrfrp/server/deploy/update-server.sh /usr/local/sbin/zrfrp-update-server
 chown -R zrfrp:zrfrp /opt/zrfrp /var/lib/zrfrp /var/log/zrfrp
 chown root:zrfrp /etc/zrfrp
 chmod 0770 /etc/zrfrp
-chmod 0660 /etc/zrfrp/frps.toml
+chown root:zrfrp /etc/zrfrp/frps.toml
+chmod 0640 /etc/zrfrp/frps.toml
 chmod 0640 /opt/zrfrp/server/appsettings.Production.json
 
 if [[ -n "${ZRFRP_RESET_ADMIN_PASSWORD:-}" ]]; then

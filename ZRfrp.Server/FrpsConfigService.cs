@@ -53,10 +53,6 @@ name = "zrfrp-policy"
 addr = "127.0.0.1:7600"
 path = "/frp-plugin"
 ops = ["Login", "NewProxy", "CloseProxy", "Ping", "NewUserConn"]
-
-log.to = "/var/log/zrfrp/frps.log"
-log.level = "{{Escape(model.LogLevel)}}"
-log.maxDays = {{model.LogMaxDays}}
 """;
 
     private static string ReadString(string text, string key, string fallback)

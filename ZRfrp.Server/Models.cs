@@ -116,6 +116,16 @@ public sealed record AllocationResponse(
     string BandwidthLimit,
     bool Locked);
 public sealed record ConfigUpdateRequest(string Content, bool Restart);
+public sealed record FrpsInstallStatus(
+    bool Installed,
+    string Version,
+    bool Reachable,
+    string ServiceState,
+    bool BinaryExists,
+    bool ConfigExists,
+    bool OptWritable,
+    bool FileSystemReadOnly,
+    string Message);
 public sealed record FrpsConfigModel(
     string BindAddress,
     int BindPort,

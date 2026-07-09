@@ -17,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/zrfrp
+ReadWritePaths=/etc/zrfrp /var/log/zrfrp
 
 [Install]
 WantedBy=multi-user.target

@@ -1,4 +1,17 @@
-# ZRfrp v2.0.5
+# ZRfrp v2.0.7
+
+- 修复 frps 服务无法读取 `/etc/zrfrp/frps.toml` 时反复退出的问题。
+- 默认 frps 配置不再生成当前 frps 校验不兼容的 `log.*` 字段，日志改由 systemd/journal 接管。
+- 安装和修复脚本会每次强制校正 `/etc/zrfrp` 与 `frps.toml` 的属主和权限。
+
+## v2.0.6
+
+- 修复 systemd 沙箱未开放 `/opt/zrfrp` 写入权限，导致面板安装 frps 报 `Read-only file system` 的问题。
+- 新增面板内 `frps` 自动修复能力，可修复目录权限、重新安装 frps 并重启服务。
+- 服务状态页启动/重启 frps 后会再次验证控制端口，避免显示“已启动”但实际不可用。
+- 系统维护页显示 systemd 状态、`/opt/zrfrp` 写入状态和更明确的诊断提示。
+
+## v2.0.5
 
 - 修复从已删除或不可访问的当前目录执行密码恢复时出现 `DirectoryNotFoundException`。
 - 服务端固定使用程序所在目录作为 ASP.NET Core 内容根目录。
