@@ -1,4 +1,9 @@
-# ZRfrp v2.1.6
+# ZRfrp v2.1.7
+
+- Linux Server 发布包改为自包含版本，内置 .NET 运行环境，不再依赖服务器预装 ASP.NET Core Runtime。
+- 修复缺失运行环境时服务进程反复退出、浏览器显示 ERR_EMPTY_RESPONSE 的问题。
+
+## v2.1.6
 
 - 以 v2.1.3 的稳定功能代码为基础重新发布，未包含公网地址自动识别相关改动。
 - 保留放大后的 Desktop、托盘与 Web favicon 图标资源。
