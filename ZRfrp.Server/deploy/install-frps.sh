@@ -10,8 +10,16 @@ esac
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
-URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
-curl --fail --location --retry 3 "${URL}" -o "${TMP}/frp.tar.gz"
+URL="${ZRFRP_FRP_URL:-https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz}"
+if ! curl --fail --location --retry 8 --retry-all-errors --retry-delay 2 \
+  --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
+  "${URL}" -o "${TMP}/frp.tar.gz"; then
+  cat >&2 <<EOF
+frps 下载失败，通常是当前服务器访问 GitHub Release CDN 超时或返回 5xx。
+请稍后重试，或通过 ZRFRP_FRP_URL 指定可访问的 frp 压缩包地址。
+EOF
+  exit 22
+fi
 tar -xzf "${TMP}/frp.tar.gz" -C "${TMP}"
 install -d -o zrfrp -g zrfrp /opt/zrfrp /etc/zrfrp /var/log/zrfrp
 install -m 0755 "${TMP}/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frps" /opt/zrfrp/frps.new

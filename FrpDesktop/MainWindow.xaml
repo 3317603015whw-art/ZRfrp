@@ -135,7 +135,7 @@
                             </Button>
                         </StackPanel>
                         <Button x:Name="VersionButton"
-                                Content="ZRfrp v2.0.7"
+                                Content="ZRfrp v2.0.8"
                                 Style="{StaticResource GhostButton}"
                                 HorizontalAlignment="Left"
                                 Padding="0"

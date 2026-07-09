@@ -24,20 +24,34 @@ if [[ "${VERSION}" == "latest" ]]; then
 else
   RELEASE_URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}/zrfrp-server-${RID}.tar.gz"
 fi
-FRP_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
+FRP_URL="${ZRFRP_FRP_URL:-https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz}"
 
 id -u zrfrp >/dev/null 2>&1 || useradd --system --home /var/lib/zrfrp --shell /usr/sbin/nologin zrfrp
 install -d -o zrfrp -g zrfrp /opt/zrfrp/server /etc/zrfrp /var/lib/zrfrp /var/lib/zrfrp/keys /var/log/zrfrp
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
-curl --fail --location --retry 3 "${RELEASE_URL}" -o "${TMP}/server.tar.gz"
+curl --fail --location --retry 8 --retry-all-errors --retry-delay 2 \
+  --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
+  "${RELEASE_URL}" -o "${TMP}/server.tar.gz"
 tar -xzf "${TMP}/server.tar.gz" -C /opt/zrfrp/server
 chmod 0755 /opt/zrfrp/server/zrfrp-server
 
-curl --fail --location --retry 3 "${FRP_URL}" -o "${TMP}/frp.tar.gz"
-tar -xzf "${TMP}/frp.tar.gz" -C "${TMP}"
-install -m 0755 "${TMP}/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frps" /opt/zrfrp/frps
+if [[ "${ZRFRP_REINSTALL_FRPS:-0}" == "1" || ! -x /opt/zrfrp/frps ]]; then
+  if ! curl --fail --location --retry 8 --retry-all-errors --retry-delay 2 \
+    --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
+    "${FRP_URL}" -o "${TMP}/frp.tar.gz"; then
+    cat >&2 <<EOF
+frps 下载失败，通常是当前服务器访问 GitHub Release CDN 超时或返回 5xx。
+如果本机已经安装过 frps，可以稍后重试 ZRfrp Server 更新；如果是首次安装，请稍后重试或通过 ZRFRP_FRP_URL 指定可访问的 frp 压缩包地址。
+EOF
+    exit 22
+  fi
+  tar -xzf "${TMP}/frp.tar.gz" -C "${TMP}"
+  install -m 0755 "${TMP}/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frps" /opt/zrfrp/frps
+else
+  echo "检测到已有 /opt/zrfrp/frps，跳过 frp 本体下载。若需重装 frps，请设置 ZRFRP_REINSTALL_FRPS=1。"
+fi
 
 if [[ -f /etc/zrfrp/zrfrp.env ]]; then
   # shellcheck disable=SC1091

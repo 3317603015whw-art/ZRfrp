@@ -1,4 +1,12 @@
-# ZRfrp v2.0.7
+# ZRfrp v2.0.8
+
+- 增强面板一键更新：下载 GitHub Release 资产时启用更多重试和网络错误重试。
+- 服务端更新超时时间从 20 秒延长到 5 分钟，避免慢速网络下被面板提前中断。
+- 更新失败时会提示可复制的 SSH 手动安装命令，方便在 GitHub CDN 抖动时恢复。
+- 安装脚本在检测到已有 `/opt/zrfrp/frps` 时会跳过 frp 本体下载，避免升级 ZRfrp Server 被 fatedier/frp 资产下载 504 阻断。
+- 支持通过 `ZRFRP_REINSTALL_FRPS=1` 强制重装 frps，通过 `ZRFRP_FRP_URL` 指定自定义 frp 下载地址。
+
+## v2.0.7
 
 - 修复 frps 服务无法读取 `/etc/zrfrp/frps.toml` 时反复退出的问题。
 - 默认 frps 配置不再生成当前 frps 校验不兼容的 `log.*` 字段，日志改由 systemd/journal 接管。

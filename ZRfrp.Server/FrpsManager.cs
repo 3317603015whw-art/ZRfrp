@@ -174,7 +174,7 @@ public sealed class FrpsManager
         RunAsync("sudo", ["/usr/local/sbin/zrfrp-repair-frps"], TimeSpan.FromMinutes(3));
 
     public Task<(int ExitCode, string Output)> ScheduleServerUpdateAsync() =>
-        RunAsync("sudo", ["/usr/local/sbin/zrfrp-update-server"], TimeSpan.FromSeconds(20));
+        RunAsync("sudo", ["/usr/local/sbin/zrfrp-update-server"], TimeSpan.FromMinutes(5));
 
     public async Task<FrpsInstallStatus> GetInstallStatusAsync(CancellationToken cancellationToken)
     {
