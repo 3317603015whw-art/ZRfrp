@@ -1,6 +1,6 @@
 # ZRfrp
 
-ZRfrp 2 是一套面向 frp 的多用户控制平台，包含 Windows Desktop 客户端和 Linux Server 控制平面。历史个人使用版冻结在 [`personal-manager`](https://github.com/3317603015whw-art/ZRfrp/tree/personal-manager) 分支。
+ZRfrp 是一套面向 frp 的多用户控制平台，包含 Windows Desktop 客户端和 Linux Server 控制平面。历史个人使用版冻结在 [`personal-manager`](https://github.com/3317603015whw-art/ZRfrp/tree/personal-manager) 分支。
 
 它面向已经拥有 frps 服务端的用户，目标是把终端里的 frpc 配置、启动、停止、日志查看和常用隧道管理变成更顺手的桌面体验。
 
