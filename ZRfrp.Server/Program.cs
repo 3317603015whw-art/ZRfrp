@@ -429,6 +429,32 @@ app.MapPut("/api/admin/accounts/{id}", async (
     return Results.Ok();
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
+app.MapDelete("/api/admin/accounts/{id}", async (string id, StateStore store) =>
+{
+    var account = store.State.Accounts.FirstOrDefault(item => item.Id == id);
+    if (account is null)
+    {
+        return Results.NotFound();
+    }
+    if (!account.Role.Equals("customer", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { error = "管理员账号不能在客户账号列表中删除。" });
+    }
+
+    store.State.Accounts.Remove(account);
+    store.State.AccountSessions.RemoveAll(item => item.AccountId == account.Id);
+    store.State.Clients.RemoveAll(item => item.AccountId == account.Id);
+    store.State.Allocations.RemoveAll(item => item.AccountId == account.Id);
+    foreach (var key in store.State.TrafficSnapshots.Keys
+                 .Where(key => key.Contains(account.Id + ".", StringComparison.Ordinal))
+                 .ToArray())
+    {
+        store.State.TrafficSnapshots.Remove(key);
+    }
+    await store.AuditAsync("account", $"删除客户账号 {account.Username}");
+    return Results.Ok(new { message = $"客户账号 {account.Username} 已删除。" });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
 app.MapPost("/api/admin/accounts/{id}/reset-traffic", async (
     string id, StateStore store) =>
 {

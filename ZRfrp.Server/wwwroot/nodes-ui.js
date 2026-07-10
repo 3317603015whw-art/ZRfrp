@@ -1,14 +1,14 @@
 const nodeFlagChoices = [
   ["", "无国旗"],
-  ["CN", "🇨🇳 中国"],
-  ["JP", "🇯🇵 日本"],
-  ["US", "🇺🇸 美国"],
-  ["SG", "🇸🇬 新加坡"],
-  ["HK", "🇭🇰 中国香港"],
-  ["KR", "🇰🇷 韩国"],
-  ["DE", "🇩🇪 德国"],
-  ["GB", "🇬🇧 英国"],
-  ["FR", "🇫🇷 法国"]
+  ["CN", "CN 中国"],
+  ["JP", "JP 日本"],
+  ["US", "US 美国"],
+  ["SG", "SG 新加坡"],
+  ["HK", "HK 中国香港"],
+  ["KR", "KR 韩国"],
+  ["DE", "DE 德国"],
+  ["GB", "GB 英国"],
+  ["FR", "FR 法国"]
 ];
 
 function normalizedNodeName(value) {
@@ -27,9 +27,20 @@ function inferredNodeFlag(value) {
 }
 
 function nodeFlagSelect(id, flagCode) {
-  return '<select class="node-flag-select" data-id="' + escapeHtml(id) + '">'
+  const image = '<img class="flag-icon node-flag-preview' + (flagCode ? "" : " hidden") + '"'
+    + (flagCode ? ' src="/flags/' + flagCode.toLowerCase() + '.png"' : "")
+    + ' alt="' + escapeHtml(flagCode) + '">';
+  return '<span class="node-flag-picker">' + image
+    + '<select class="node-flag-select" data-id="' + escapeHtml(id) + '">'
     + nodeFlagChoices.map(([code, label]) => '<option value="' + code + '"' + (code === flagCode ? " selected" : "") + '>' + label + "</option>").join("")
-    + "</select>";
+    + "</select></span>";
+}
+
+function updateFlagPreview(select, image) {
+  const code = select.value.toLowerCase();
+  image.classList.toggle("hidden", !code);
+  image.alt = select.value;
+  if (code) image.src = "/flags/" + code + ".png";
 }
 
 function nodeRow(node, isLocal) {
@@ -65,6 +76,9 @@ loadNodes = async function () {
       activeProxies: Number($("#metric-proxies").textContent || 0)
     };
     $("#nodes-body").innerHTML = nodeRow(local, true) + nodes.map(node => nodeRow(node, false)).join("");
+    $$(".node-flag-select").forEach(select => {
+      select.onchange = () => updateFlagPreview(select, select.closest(".node-flag-picker").querySelector(".node-flag-preview"));
+    });
     $$(".node-save").forEach(button => button.onclick = async () => {
       try {
         const id = button.dataset.id;
@@ -93,6 +107,10 @@ loadNodes = async function () {
     });
   } catch (error) { toast(error.message); }
 };
+
+const enrollmentFlagSelect = $("#node-enrollment-flag");
+const enrollmentFlagImage = $("#node-enrollment-flag-image");
+enrollmentFlagSelect.onchange = () => updateFlagPreview(enrollmentFlagSelect, enrollmentFlagImage);
 
 $("#node-enrollment-form").onsubmit = async event => {
   event.preventDefault();

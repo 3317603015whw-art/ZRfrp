@@ -11,15 +11,15 @@
     <Product>ZRfrp</Product>
     <Description>Visual frp desktop client for Windows</Description>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
-    <AssemblyVersion>2.1.13.0</AssemblyVersion>
-    <FileVersion>2.1.13.0</FileVersion>
-    <Version>2.1.13</Version>
+    <AssemblyVersion>2.1.14.0</AssemblyVersion>
+    <FileVersion>2.1.14.0</FileVersion>
+    <Version>2.1.14</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="Assets\AppIcon.ico" />
     <Resource Include="Assets\AppLogo32.png" />
-    <Resource Include="Assets\Flags\jp.png" />
+    <Resource Include="Assets\Flags\*.png" />
   </ItemGroup>
 
 </Project>

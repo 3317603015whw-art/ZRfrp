@@ -50,7 +50,7 @@
       </nav>
       <div class="aside-foot">
         <span id="node-health" class="health"><i></i>检测中</span>
-        <button id="version-button" class="quiet">v2.1.13</button>
+        <button id="version-button" class="quiet">v2.1.14</button>
         <button id="logout" class="quiet">退出登录</button>
       </div>
     </aside>
@@ -101,7 +101,7 @@
             <p class="notice">新节点只需能够访问主控面板。ZRfrp Server 与 frps 安装包由主控缓存并转发，无需新节点连接 GitHub。</p>
             <div class="config-grid">
               <label>节点名称<input id="node-enrollment-name" maxlength="64" placeholder="例如 JP 东京节点" required></label>
-              <label>国家或地区<select id="node-enrollment-flag"><option value="">无国旗</option><option value="CN">🇨🇳 中国</option><option value="JP">🇯🇵 日本</option><option value="US">🇺🇸 美国</option><option value="SG">🇸🇬 新加坡</option><option value="HK">🇭🇰 中国香港</option><option value="KR">🇰🇷 韩国</option><option value="DE">🇩🇪 德国</option><option value="GB">🇬🇧 英国</option><option value="FR">🇫🇷 法国</option></select></label>
+              <label>国家或地区<span class="flag-select-field"><img id="node-enrollment-flag-image" class="flag-icon hidden" alt=""><select id="node-enrollment-flag"><option value="">无国旗</option><option value="CN">CN 中国</option><option value="JP">JP 日本</option><option value="US">US 美国</option><option value="SG">SG 新加坡</option><option value="HK">HK 中国香港</option><option value="KR">KR 韩国</option><option value="DE">DE 德国</option><option value="GB">GB 英国</option><option value="FR">FR 法国</option></select></span></label>
               <label>节点公网地址<input id="node-enrollment-host" placeholder="例如 203.0.113.10 或 jp.example.com" required></label>
               <label class="wide">主控面板地址<input id="node-enrollment-master-url" type="url" required></label>
             </div>
@@ -233,6 +233,13 @@
         </div>
       </section>
     </main>
+  </div>
+  <div id="confirm-dialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <section class="confirm-dialog">
+      <h2 id="confirm-title">确认操作</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-actions"><button id="confirm-cancel" type="button">取消</button><button id="confirm-accept" class="danger" type="button">确认删除</button></div>
+    </section>
   </div>
   <div id="toast"></div>
   <script src="/app.js"></script>

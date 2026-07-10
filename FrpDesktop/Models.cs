@@ -77,7 +77,16 @@ public sealed class FrpProfile : ObservableObject
     public string NameWithoutFlag => RemoveLeadingFlag(Name);
 
     [JsonIgnore]
-    public string FlagIconPath => GetLeadingFlagCode(Name) == "JP" ? "Assets/Flags/jp.png" : "";
+    public string FlagIconPath
+    {
+        get
+        {
+            var code = GetLeadingFlagCode(Name).ToLowerInvariant();
+            return code is "cn" or "jp" or "us" or "sg" or "hk" or "kr" or "de" or "gb" or "fr"
+                ? $"Assets/Flags/{code}.png"
+                : "";
+        }
+    }
 
     [JsonIgnore]
     public bool HasFlagIcon => !string.IsNullOrWhiteSpace(FlagIconPath);
