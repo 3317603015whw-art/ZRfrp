@@ -73,7 +73,9 @@ public sealed class ManagedNode
     public bool PublicHostLocked { get; set; }
     public string ControlUrl { get; set; } = "";
     public int FrpsPort { get; set; }
+    // Control-plane heartbeat and frps health are deliberately independent.
     public bool Online { get; set; }
+    public bool FrpsOnline { get; set; }
     public int ActiveClients { get; set; }
     public int ActiveProxies { get; set; }
     public DateTimeOffset LastSeen { get; set; }
@@ -139,7 +141,8 @@ public sealed record NodeExportEntry(
     string ControlApiUrl);
 public sealed record NodeHeartbeat(
     string Id, string Name, string PublicHost, string ControlUrl, int FrpsPort,
-    bool Online, int ActiveClients, int ActiveProxies, string Version, string FrpAuthToken);
+    bool Online, bool? FrpsOnline, int ActiveClients, int ActiveProxies,
+    string Version, string FrpAuthToken);
 public sealed record AllocationRequest(
     string ClientId,
     string ProfileId,

@@ -49,14 +49,15 @@ function nodeRow(node, isLocal) {
   const flagCode = node.flagCode || inferredNodeFlag(node.name);
   const host = node.publicHost || "";
   const version = isLocal ? "local" : (node.version || "等待接入");
-  const status = node.online ? "在线" : "离线";
+  const status = !node.online ? "控制面离线" : (node.frpsOnline === false ? "控制面在线 · frps 异常" : "在线");
+  const statusHealthy = node.online && node.frpsOnline !== false;
   const actions = '<button class="node-save" data-id="' + escapeHtml(id) + '">保存</button>'
     + (isLocal ? " <span class=\"node-local\">本机</span>"
       : ' <button class="node-restart" data-id="' + escapeHtml(id) + '">重启</button> <button class="danger node-delete" data-id="' + escapeHtml(id) + '">删除</button>');
   return '<tr><td><div class="node-editor">' + nodeFlagSelect(id, flagCode)
     + '<input class="node-name-edit" data-id="' + escapeHtml(id) + '" value="' + escapeHtml(name) + '"></div><small>' + escapeHtml(version) + "</small></td>"
     + '<td><input class="node-host-edit" data-id="' + escapeHtml(id) + '" value="' + escapeHtml(host) + '"><small>frps : ' + (node.frpsPort || 7000) + "</small></td>"
-    + '<td><span class="tag ' + (node.online ? "" : "off") + '">' + status + "</span></td>"
+    + '<td><span class="tag ' + (statusHealthy ? "" : "off") + '">' + status + "</span></td>"
     + "<td>" + (node.activeClients || 0) + "</td><td>" + (node.activeProxies || 0) + "</td>"
     + "<td>" + (isLocal ? "刚刚" : new Date(node.lastSeen).toLocaleString()) + "</td><td>" + actions + "</td></tr>";
 }
@@ -72,6 +73,7 @@ loadNodes = async function () {
       publicHost: overview.publicHost || "",
       frpsPort: overview.bindPort || 7000,
       online: overview.reachable,
+      frpsOnline: overview.reachable,
       activeClients: Number($("#metric-clients").textContent || 0),
       activeProxies: Number($("#metric-proxies").textContent || 0)
     };

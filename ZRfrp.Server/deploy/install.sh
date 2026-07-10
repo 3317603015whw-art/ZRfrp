@@ -147,6 +147,10 @@ systemctl daemon-reload
 systemctl enable zrfrp-server zrfrp-frps
 systemctl restart zrfrp-server zrfrp-frps
 
+sleep 2
+SERVER_STATE="$(systemctl is-active zrfrp-server 2>/dev/null || true)"
+FRPS_STATE="$(systemctl is-active zrfrp-frps 2>/dev/null || true)"
+
 echo
 echo "ZRfrp Server 已安装。"
 echo "面板地址: http://${PUBLIC_HOST}:7600"
@@ -154,4 +158,15 @@ echo "初始管理员密码（若未在面板修改）: ${ADMIN_PASSWORD}"
 echo "客户端 API Key: ${CLIENT_KEY}"
 echo "frp Token: ${FRP_TOKEN}"
 echo "节点 Peer Key: ${PEER_KEY}"
+echo "控制面服务状态: ${SERVER_STATE}"
+echo "frps 服务状态: ${FRPS_STATE}"
+if [[ "${ZRFRP_MODE:-master}" == "node" ]]; then
+  echo "主控地址: ${ZRFRP_MASTER_URL:-未配置}"
+  if [[ "${SERVER_STATE}" != "active" || "${FRPS_STATE}" != "active" ]]; then
+    echo "节点服务未完全启动，请执行以下命令查看原因：" >&2
+    echo "journalctl -u zrfrp-server -u zrfrp-frps -n 80 --no-pager" >&2
+  else
+    echo "节点将在 15 秒内向主控上报；若仍显示离线，请查看 zrfrp-server 日志中的心跳错误。"
+  fi
+fi
 echo "请立即保存以上凭据，并通过防火墙或 HTTPS 反向代理保护 7600 端口。"

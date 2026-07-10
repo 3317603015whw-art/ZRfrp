@@ -566,10 +566,6 @@ app.MapPost("/api/update", async (ClaimsPrincipal principal, FrpsManager frps) =
 app.MapGet("/api/admin/nodes", (StateStore store, ServerOptions serverOptions) =>
 {
     var cutoff = DateTimeOffset.UtcNow.AddSeconds(-45);
-    foreach (var node in store.State.Nodes)
-    {
-        node.Online = node.Online && node.LastSeen >= cutoff;
-    }
     return Results.Ok(store.State.Nodes.Select(node => new
     {
         node.Id,
@@ -578,7 +574,8 @@ app.MapGet("/api/admin/nodes", (StateStore store, ServerOptions serverOptions) =
         node.PublicHost,
         node.ControlUrl,
         node.FrpsPort,
-        node.Online,
+        online = node.Online && node.LastSeen >= cutoff,
+        node.FrpsOnline,
         node.ActiveClients,
         node.ActiveProxies,
         node.LastSeen,
@@ -620,6 +617,7 @@ app.MapPost("/api/admin/nodes/enrollment", async (
         ControlUrl = $"http://{publicHost}:7600",
         FrpsPort = serverOptions.FrpsBindPort,
         Online = false,
+        FrpsOnline = false,
         LastSeen = DateTimeOffset.UtcNow,
         EnrollmentTokenHash = Security.HashToken(enrollmentToken),
         EnrollmentExpiresAt = DateTimeOffset.UtcNow.AddHours(2),
@@ -766,7 +764,8 @@ app.MapPost("/api/peer/heartbeat", async (
         node.ControlUrl = heartbeat.ControlUrl;
     }
     node.FrpsPort = heartbeat.FrpsPort;
-    node.Online = heartbeat.Online;
+    node.Online = true;
+    node.FrpsOnline = heartbeat.FrpsOnline ?? heartbeat.Online;
     node.ActiveClients = heartbeat.ActiveClients;
     node.ActiveProxies = heartbeat.ActiveProxies;
     node.Version = heartbeat.Version;
@@ -874,7 +873,7 @@ app.MapPost("/api/client/allocate", async (
     var cutoff = DateTimeOffset.UtcNow.AddSeconds(-45);
     var node = store.State.Nodes.FirstOrDefault(item =>
         item.Id.Equals(requestedNodeId, StringComparison.Ordinal)
-        && item.Online && item.LastSeen >= cutoff
+        && item.Online && item.FrpsOnline && item.LastSeen >= cutoff
         && !string.IsNullOrWhiteSpace(item.ControlUrl));
     if (node is null)
     {
@@ -1217,7 +1216,8 @@ static NodeExportDocument CreateNodeExport(StateStore store, ServerOptions optio
     };
 
     nodes.AddRange(store.State.Nodes
-        .Where(node => node.Online && node.LastSeen >= cutoff && !string.IsNullOrWhiteSpace(node.PublicHost))
+        .Where(node => node.Online && node.FrpsOnline && node.LastSeen >= cutoff
+            && !string.IsNullOrWhiteSpace(node.PublicHost))
         .Select(node => new NodeExportEntry(
             node.Id,
             DecoratedNodeName(
