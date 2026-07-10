@@ -78,6 +78,7 @@ public sealed class ManagedNode
     public int ActiveProxies { get; set; }
     public DateTimeOffset LastSeen { get; set; }
     public string Version { get; set; } = "";
+    public string FrpAuthToken { get; set; } = "";
     public string EnrollmentTokenHash { get; set; } = "";
     public DateTimeOffset EnrollmentExpiresAt { get; set; }
     public string EnrollmentMasterUrl { get; set; } = "";
@@ -138,14 +139,15 @@ public sealed record NodeExportEntry(
     string ControlApiUrl);
 public sealed record NodeHeartbeat(
     string Id, string Name, string PublicHost, string ControlUrl, int FrpsPort,
-    bool Online, int ActiveClients, int ActiveProxies, string Version);
+    bool Online, int ActiveClients, int ActiveProxies, string Version, string FrpAuthToken);
 public sealed record AllocationRequest(
     string ClientId,
     string ProfileId,
     string TunnelId,
     string ProxyName,
     string ProxyType,
-    string BandwidthLimit);
+    string BandwidthLimit,
+    string NodeId);
 public sealed record AllocationResponse(
     string AllocationId,
     string NodeName,
@@ -153,7 +155,12 @@ public sealed record AllocationResponse(
     int ServerPort,
     int RemotePort,
     string BandwidthLimit,
-    bool Locked);
+    bool Locked,
+    string NodeId);
+public sealed record PeerAllocationRequest(AllocationRequest Allocation, string AccountId);
+public sealed record PeerAccountValidationRequest(string AccessToken);
+public sealed record PeerAccountValidationResponse(
+    string Id, string Username, long TrafficQuotaBytes, long TrafficUsedBytes);
 public sealed record ConfigUpdateRequest(string Content, bool Restart);
 public sealed record FrpsInstallStatus(
     bool Installed,

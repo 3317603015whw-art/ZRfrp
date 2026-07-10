@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authentication;
@@ -23,6 +24,7 @@ builder.Services.AddSingleton<StateStore>();
 builder.Services.AddSingleton<FrpsManager>();
 builder.Services.AddSingleton<AllocationService>();
 builder.Services.AddSingleton<AccountService>();
+builder.Services.AddSingleton<AccountResolver>();
 builder.Services.AddSingleton<FrpsConfigService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<BootstrapPackageService>();
@@ -104,7 +106,8 @@ app.MapGet("/api/bootstrap/node/{token}/install.sh", (
     return node is null
         ? Results.NotFound()
         : Results.Text(
-            CreateMasterBootstrapScript(node, token, serverOptions.PeerKey),
+            CreateMasterBootstrapScript(
+                node, token, serverOptions.PeerKey, serverOptions.FrpAuthToken),
             "text/x-shellscript");
 });
 
@@ -767,6 +770,10 @@ app.MapPost("/api/peer/heartbeat", async (
     node.ActiveClients = heartbeat.ActiveClients;
     node.ActiveProxies = heartbeat.ActiveProxies;
     node.Version = heartbeat.Version;
+    if (!string.IsNullOrWhiteSpace(heartbeat.FrpAuthToken))
+    {
+        node.FrpAuthToken = heartbeat.FrpAuthToken;
+    }
     node.LastSeen = DateTimeOffset.UtcNow;
     node.EnrollmentTokenHash = "";
     node.EnrollmentExpiresAt = default;
@@ -785,14 +792,65 @@ app.MapPost("/api/peer/service/{action}", async (
     return result.ExitCode == 0 ? Results.Ok() : Results.BadRequest(new { error = result.Output });
 });
 
+app.MapPost("/api/peer/account/validate", (
+    PeerAccountValidationRequest request,
+    HttpContext context,
+    AccountService accounts,
+    ServerOptions serverOptions) =>
+{
+    if (!ValidatePeerKey(context, serverOptions.PeerKey))
+    {
+        return Results.Unauthorized();
+    }
+    var account = accounts.ValidateAccessToken(request.AccessToken ?? "");
+    return account is null
+        ? Results.Unauthorized()
+        : Results.Ok(new PeerAccountValidationResponse(
+            account.Id, account.Username, account.TrafficQuotaBytes, account.TrafficUsedBytes));
+});
+
+app.MapPost("/api/peer/allocate", async (
+    PeerAllocationRequest request,
+    HttpContext context,
+    AllocationService allocations,
+    ServerOptions serverOptions,
+    CancellationToken cancellationToken) =>
+{
+    if (!ValidatePeerKey(context, serverOptions.PeerKey))
+    {
+        return Results.Unauthorized();
+    }
+    var account = string.IsNullOrWhiteSpace(request.AccountId)
+        ? null
+        : new UserAccount { Id = request.AccountId, Enabled = true };
+    var localRequest = request.Allocation with { NodeId = LocalNodeId(serverOptions) };
+    var result = await allocations.AllocateAsync(localRequest, cancellationToken, account);
+    return result.Result is not null
+        ? Results.Ok(result.Result)
+        : Results.BadRequest(new { error = result.Error });
+});
+
+app.MapDelete("/api/peer/allocations/{id}", async (
+    string id, HttpContext context, AllocationService allocations, ServerOptions serverOptions) =>
+{
+    if (!ValidatePeerKey(context, serverOptions.PeerKey))
+    {
+        return Results.Unauthorized();
+    }
+    return await allocations.ReleaseAsync(id) ? Results.Ok() : Results.NotFound();
+});
+
 app.MapPost("/api/client/allocate", async (
     AllocationRequest request,
     HttpContext context,
     AllocationService allocations,
     AccountService accounts,
+    AccountResolver accountResolver,
+    StateStore store,
+    ServerOptions serverOptions,
     CancellationToken cancellationToken) =>
 {
-    var account = GetBearerAccount(context, accounts);
+    var account = await accountResolver.ResolveAsync(GetBearerToken(context), cancellationToken);
     if (account is null && !HasClientKey(context, stateStore.State.ClientApiKeyHash))
     {
         return Results.Unauthorized();
@@ -801,23 +859,109 @@ app.MapPost("/api/client/allocate", async (
     {
         return Results.Json(new { error = "账号流量额度已用尽。" }, statusCode: 403);
     }
-    var result = await allocations.AllocateAsync(request, cancellationToken, account);
-    return result.Result is not null ? Results.Ok(result.Result) : Results.BadRequest(new { error = result.Error });
+    var requestedNodeId = string.IsNullOrWhiteSpace(request.NodeId)
+        ? LocalNodeId(serverOptions)
+        : request.NodeId.Trim();
+    if (requestedNodeId.Equals(LocalNodeId(serverOptions), StringComparison.Ordinal))
+    {
+        var result = await allocations.AllocateAsync(
+            request with { NodeId = requestedNodeId }, cancellationToken, account);
+        return result.Result is not null
+            ? Results.Ok(result.Result)
+            : Results.BadRequest(new { error = result.Error });
+    }
+
+    var cutoff = DateTimeOffset.UtcNow.AddSeconds(-45);
+    var node = store.State.Nodes.FirstOrDefault(item =>
+        item.Id.Equals(requestedNodeId, StringComparison.Ordinal)
+        && item.Online && item.LastSeen >= cutoff
+        && !string.IsNullOrWhiteSpace(item.ControlUrl));
+    if (node is null)
+    {
+        return Results.BadRequest(new { error = "所选远程节点离线或不可用。" });
+    }
+
+    var staleLocalAllocations = store.State.Allocations.Where(item =>
+        item.Active
+        && item.ClientId.Equals(request.ClientId, StringComparison.Ordinal)
+        && item.TunnelId.Equals(request.TunnelId, StringComparison.Ordinal)
+        && (string.IsNullOrWhiteSpace(item.NodeId)
+            || item.NodeId.Equals(LocalNodeId(serverOptions), StringComparison.Ordinal))).ToArray();
+    if (staleLocalAllocations.Length > 0)
+    {
+        foreach (var stale in staleLocalAllocations)
+        {
+            stale.Active = false;
+            stale.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        await store.SaveAsync();
+    }
+
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+    using var peerRequest = new HttpRequestMessage(
+        HttpMethod.Post, node.ControlUrl.TrimEnd('/') + "/api/peer/allocate");
+    peerRequest.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
+    peerRequest.Content = JsonContent.Create(new PeerAllocationRequest(
+        request with { NodeId = requestedNodeId }, account?.Id ?? ""));
+    using var peerResponse = await client.SendAsync(peerRequest, cancellationToken);
+    var peerBody = await peerResponse.Content.ReadAsStringAsync(cancellationToken);
+    if (!peerResponse.IsSuccessStatusCode)
+    {
+        return Results.BadRequest(new { error = ReadRemoteError(peerBody, "远程节点拒绝了端口分配。") });
+    }
+    var peerAllocation = JsonSerializer.Deserialize<AllocationResponse>(
+        peerBody, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    if (peerAllocation is not null
+        && !string.Equals(peerAllocation.NodeId, requestedNodeId, StringComparison.Ordinal))
+    {
+        return Results.BadRequest(new { error = "远程节点返回了不匹配的节点标识，分配已拒绝。" });
+    }
+    return peerAllocation is null
+        ? Results.BadRequest(new { error = "远程节点返回了无效分配结果。" })
+        : Results.Ok(peerAllocation);
 });
 
 app.MapDelete("/api/client/allocations/{id}", async (
-    string id, HttpContext context, AllocationService allocations, AccountService accounts) =>
+    string id,
+    string? nodeId,
+    HttpContext context,
+    AllocationService allocations,
+    AccountService accounts,
+    StateStore store,
+    ServerOptions serverOptions,
+    CancellationToken cancellationToken) =>
 {
     if (GetBearerAccount(context, accounts) is null
         && !HasClientKey(context, stateStore.State.ClientApiKeyHash))
     {
         return Results.Unauthorized();
     }
-    return await allocations.ReleaseAsync(id) ? Results.Ok() : Results.NotFound();
+    var requestedNodeId = string.IsNullOrWhiteSpace(nodeId) ? LocalNodeId(serverOptions) : nodeId.Trim();
+    if (requestedNodeId.Equals(LocalNodeId(serverOptions), StringComparison.Ordinal))
+    {
+        return await allocations.ReleaseAsync(id) ? Results.Ok() : Results.NotFound();
+    }
+    var node = store.State.Nodes.FirstOrDefault(item =>
+        item.Id.Equals(requestedNodeId, StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(item.ControlUrl));
+    if (node is null)
+    {
+        return Results.NotFound();
+    }
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+    using var peerRequest = new HttpRequestMessage(
+        HttpMethod.Delete, $"{node.ControlUrl.TrimEnd('/')}/api/peer/allocations/{Uri.EscapeDataString(id)}");
+    peerRequest.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
+    using var peerResponse = await client.SendAsync(peerRequest, cancellationToken);
+    return peerResponse.IsSuccessStatusCode ? Results.Ok() : Results.StatusCode((int)peerResponse.StatusCode);
 });
 
 app.MapPost("/frp-plugin", async (
-    HttpContext context, AllocationService allocations, AccountService accounts, StateStore store) =>
+    HttpContext context,
+    AllocationService allocations,
+    AccountService accounts,
+    AccountResolver accountResolver,
+    StateStore store) =>
 {
     if (context.Connection.RemoteIpAddress is null
         || !System.Net.IPAddress.IsLoopback(context.Connection.RemoteIpAddress))
@@ -836,7 +980,7 @@ app.MapPost("/frp-plugin", async (
     {
         var metas = content["metas"] as JsonObject;
         var accessToken = metas?["zrfrp_access_token"]?.GetValue<string>() ?? "";
-        var account = accounts.ValidateAccessToken(accessToken);
+        var account = await accountResolver.ResolveAsync(accessToken, context.RequestAborted);
         if (account is null)
         {
             return Results.Ok(new { reject = true, reject_reason = "ZRfrp: account session is invalid or expired" });
@@ -853,7 +997,7 @@ app.MapPost("/frp-plugin", async (
     {
         var metas = FindMetas(content);
         var accessToken = metas?["zrfrp_access_token"]?.GetValue<string>() ?? "";
-        var account = accounts.ValidateAccessToken(accessToken);
+        var account = await accountResolver.ResolveAsync(accessToken, context.RequestAborted);
         if (account is not null)
         {
             await TrackClientAsync(store, account, context, content);
@@ -867,7 +1011,7 @@ app.MapPost("/frp-plugin", async (
         var metas = user?["metas"] as JsonObject;
         var clientId = metas?["zrfrp_client_id"]?.GetValue<string>() ?? "";
         var accessToken = metas?["zrfrp_access_token"]?.GetValue<string>() ?? "";
-        var account = accounts.ValidateAccessToken(accessToken);
+        var account = await accountResolver.ResolveAsync(accessToken, context.RequestAborted);
         if (account is null || accounts.IsQuotaExceeded(account))
         {
             return Results.Ok(new { reject = true, reject_reason = "ZRfrp: account is unavailable or over quota" });
@@ -895,7 +1039,7 @@ app.MapPost("/frp-plugin", async (
         var user = content["user"] as JsonObject;
         var metas = user?["metas"] as JsonObject;
         var accessToken = metas?["zrfrp_access_token"]?.GetValue<string>() ?? "";
-        var account = accounts.ValidateAccessToken(accessToken);
+        var account = await accountResolver.ResolveAsync(accessToken, context.RequestAborted);
         if (account is null || accounts.IsQuotaExceeded(account))
         {
             return Results.Ok(new { reject = true, reject_reason = "ZRfrp: traffic quota exceeded" });
@@ -920,6 +1064,32 @@ static UserAccount? GetBearerAccount(HttpContext context, AccountService account
     return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
         ? accounts.ValidateAccessToken(authorization[7..].Trim())
         : null;
+}
+
+static string GetBearerToken(HttpContext context)
+{
+    var authorization = context.Request.Headers.Authorization.ToString();
+    return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? authorization[7..].Trim()
+        : "";
+}
+
+static string LocalNodeId(ServerOptions options) =>
+    string.IsNullOrWhiteSpace(options.NodeId) ? "local" : options.NodeId;
+
+static string ReadRemoteError(string body, string fallback)
+{
+    try
+    {
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.TryGetProperty("error", out var error)
+            ? error.GetString() ?? fallback
+            : fallback;
+    }
+    catch (JsonException)
+    {
+        return string.IsNullOrWhiteSpace(body) ? fallback : body;
+    }
 }
 
 static bool DashboardHasItems(JsonElement? element)
@@ -1055,7 +1225,7 @@ static NodeExportDocument CreateNodeExport(StateStore store, ServerOptions optio
                 NodeFlagCode(node.FlagCode, node.Name)),
             node.PublicHost,
             node.FrpsPort > 0 ? node.FrpsPort : options.FrpsBindPort,
-            options.FrpAuthToken,
+            string.IsNullOrWhiteSpace(node.FrpAuthToken) ? options.FrpAuthToken : node.FrpAuthToken,
             platformUrl)));
 
     return new NodeExportDocument("zrfrp-node-export", 1, platformUrl, DateTimeOffset.UtcNow, nodes);
@@ -1139,7 +1309,8 @@ static ManagedNode? FindEnrollmentNode(StateStore store, string token)
         && Security.VerifyToken(token, node.EnrollmentTokenHash));
 }
 
-static string CreateMasterBootstrapScript(ManagedNode node, string token, string peerKey)
+static string CreateMasterBootstrapScript(
+    ManagedNode node, string token, string peerKey, string frpAuthToken)
 {
     var prefix =
         $"{node.EnrollmentMasterUrl.TrimEnd('/')}/api/bootstrap/node/{Uri.EscapeDataString(token)}";
@@ -1163,6 +1334,7 @@ static string CreateMasterBootstrapScript(ManagedNode node, string token, string
         $"export ZRFRP_MASTER_URL={ShellQuote(node.EnrollmentMasterUrl.TrimEnd('/'))}",
         $"export ZRFRP_MASTER_KEY={ShellQuote(peerKey)}",
         $"export ZRFRP_PEER_KEY={ShellQuote(peerKey)}",
+        $"export ZRFRP_FRP_TOKEN={ShellQuote(frpAuthToken)}",
         "curl --fail --silent --show-error --location \"${PREFIX}/installer\" | bash"
     ]);
 }

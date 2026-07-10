@@ -34,7 +34,8 @@ public sealed class NodeHeartbeatService : BackgroundService
                     await _frps.IsReachableAsync(stoppingToken),
                     0,
                     0,
-                    UpdateService.CurrentVersion);
+                    UpdateService.CurrentVersion,
+                    _options.FrpAuthToken);
                 using var request = new HttpRequestMessage(
                     HttpMethod.Post, _options.MasterUrl.TrimEnd('/') + "/api/peer/heartbeat");
                 request.Headers.Add("X-ZRfrp-Peer-Key", _options.MasterKey);

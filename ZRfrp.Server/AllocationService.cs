@@ -42,11 +42,16 @@ public sealed class AllocationService
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            var nodeId = string.IsNullOrWhiteSpace(request.NodeId)
+                ? LocalNodeId()
+                : request.NodeId.Trim();
             var existing = _store.State.Allocations.FirstOrDefault(item =>
                 item.ClientId == request.ClientId && item.TunnelId == request.TunnelId && item.Active
+                && (item.NodeId == nodeId || string.IsNullOrWhiteSpace(item.NodeId))
                 && (account is null || item.AccountId == account.Id));
             if (existing is not null)
             {
+                existing.NodeId = nodeId;
                 existing.BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant();
                 existing.ProxyName = request.ProxyName;
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
@@ -72,7 +77,8 @@ public sealed class AllocationService
                 ProxyType = request.ProxyType,
                 RemotePort = port,
                 BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant(),
-                AccountId = account?.Id ?? ""
+                AccountId = account?.Id ?? "",
+                NodeId = nodeId
             };
             _store.State.Allocations.Add(allocation);
             await _store.AuditAsync("allocate", $"{request.ClientId}/{request.ProxyName} -> {port}");
@@ -107,12 +113,16 @@ public sealed class AllocationService
 
     private AllocationResponse ToResponse(PortAllocation allocation) => new(
         allocation.Id,
-        Environment.MachineName,
+        string.IsNullOrWhiteSpace(_options.NodeName) ? Environment.MachineName : _options.NodeName,
         string.IsNullOrWhiteSpace(_options.PublicHost) ? _options.FrpsAddress : _options.PublicHost,
         _options.FrpsBindPort,
         allocation.RemotePort,
         allocation.BandwidthLimit,
-        true);
+        true,
+        string.IsNullOrWhiteSpace(allocation.NodeId) ? LocalNodeId() : allocation.NodeId);
+
+    private string LocalNodeId() =>
+        string.IsNullOrWhiteSpace(_options.NodeId) ? "local" : _options.NodeId;
 
     private static bool IsPortAvailable(int port, string type)
     {

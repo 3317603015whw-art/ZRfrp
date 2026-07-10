@@ -52,6 +52,7 @@ public sealed class FrpProfile : ObservableObject
     private string _accountId = "";
     private string _accountAccessToken = "";
     private DateTimeOffset _accountTokenExpiresAt;
+    private string _managedNodeId = "";
 
     public string Id
     {
@@ -139,6 +140,12 @@ public sealed class FrpProfile : ObservableObject
         set => SetField(ref _accountId, value);
     }
 
+    public string ManagedNodeId
+    {
+        get => _managedNodeId;
+        set => SetField(ref _managedNodeId, value);
+    }
+
     public string AccountAccessToken
     {
         get => _accountAccessToken;
@@ -220,6 +227,7 @@ public sealed class FrpProfile : ObservableObject
             ControlApiUrl = ControlApiUrl,
             ControlApiKey = ControlApiKey,
             AccountId = AccountId,
+            ManagedNodeId = ManagedNodeId,
             AccountAccessToken = AccountAccessToken,
             AccountTokenExpiresAt = AccountTokenExpiresAt,
             Proxies = new ObservableCollection<FrpProxy>(Proxies.Select(proxy => proxy.Clone()))

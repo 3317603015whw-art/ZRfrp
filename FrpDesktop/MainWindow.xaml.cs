@@ -105,8 +105,9 @@ public partial class MainWindow : Window
         AppendLog($"配置目录：{_store.AppDataDirectory}");
         AppendLog("管理器已就绪。");
         UpdateRunningState(false);
-        _ = TestAllProfilesLatencyAsync();
         await CheckDesktopUpdateAsync(showNotification: true);
+        await RefreshAuthorizedNodesAsync();
+        _ = TestAllProfilesLatencyAsync();
         if (ShouldShowFirstLoginDialog())
         {
             ShowFirstLoginDialog();
@@ -504,6 +505,14 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("请先登录控制平台账号。");
             }
             ValidateProfile(profile);
+            if (profile.ServerManaged)
+            {
+                foreach (var proxy in profile.Proxies.Where(proxy => proxy.Enabled))
+                {
+                    await ApplyServerAllocationAsync(profile, proxy);
+                }
+                SaveState();
+            }
             var configPath = _store.GetGeneratedConfigPath(profile);
             File.WriteAllText(configPath, FrpConfigSerializer.ToToml(profile), Utf8NoBom);
             NodeGeneratedConfigTextBox.Text = configPath;
@@ -621,6 +630,7 @@ public partial class MainWindow : Window
     private int ImportNodeDocument(NodeExportDocument document, ClientAccountSession? session)
     {
         var imported = 0;
+        var matchedProfileIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var node in document.Nodes)
         {
             if (string.IsNullOrWhiteSpace(node.ServerAddress) || node.ServerPort <= 0)
@@ -631,33 +641,46 @@ public partial class MainWindow : Window
             var controlUrl = string.IsNullOrWhiteSpace(node.ControlApiUrl)
                 ? document.PlatformUrl
                 : node.ControlApiUrl;
-            var exists = _state.Profiles.Any(profile =>
-                string.Equals(profile.ServerAddr, node.ServerAddress, StringComparison.OrdinalIgnoreCase)
-                && profile.ServerPort == node.ServerPort
-                && string.Equals(profile.ControlApiUrl.TrimEnd('/'), controlUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
-            if (exists)
+            var normalizedName = NormalizeImportedNodeName(node, _state.Profiles.Count + 1);
+            var candidates = _state.Profiles.Where(profile =>
+                profile.ServerManaged && !matchedProfileIds.Contains(profile.Id)).ToArray();
+            var profile = candidates.FirstOrDefault(profile =>
+                    !string.IsNullOrWhiteSpace(profile.ManagedNodeId)
+                    && profile.ManagedNodeId.Equals(node.Id, StringComparison.Ordinal))
+                ?? candidates.FirstOrDefault(profile =>
+                    profile.Name.Equals(normalizedName, StringComparison.OrdinalIgnoreCase))
+                ?? candidates.FirstOrDefault(profile =>
+                    profile.NameWithoutFlag.Equals(
+                        new FrpProfile { Name = normalizedName }.NameWithoutFlag,
+                        StringComparison.OrdinalIgnoreCase))
+                ?? candidates.FirstOrDefault(profile =>
+                    profile.ServerAddr.Equals(node.ServerAddress, StringComparison.OrdinalIgnoreCase)
+                    && profile.ServerPort == node.ServerPort);
+            if (profile is null)
             {
-                continue;
+                profile = new FrpProfile
+                {
+                    FrpcPath = _state.ClientFrpcPath,
+                    ServerManaged = true
+                };
+                _state.Profiles.Add(profile);
+                imported++;
             }
 
-            var profile = new FrpProfile
-            {
-                Name = NormalizeImportedNodeName(node, _state.Profiles.Count + 1),
-                FrpcPath = _state.ClientFrpcPath,
-                ServerAddr = node.ServerAddress,
-                ServerPort = node.ServerPort,
-                Token = node.FrpToken,
-                ServerManaged = true,
-                ControlApiUrl = controlUrl
-            };
+            profile.ManagedNodeId = node.Id;
+            profile.Name = normalizedName;
+            profile.ServerAddr = node.ServerAddress;
+            profile.ServerPort = node.ServerPort;
+            profile.Token = node.FrpToken;
+            profile.ServerManaged = true;
+            profile.ControlApiUrl = controlUrl;
             if (session is not null)
             {
                 profile.AccountId = session.AccountId;
                 profile.AccountAccessToken = session.AccessToken;
                 profile.AccountTokenExpiresAt = session.ExpiresAt;
             }
-            _state.Profiles.Add(profile);
-            imported++;
+            matchedProfileIds.Add(profile.Id);
         }
 
         if (_selectedProfile is null && _state.Profiles.Count > 0)
@@ -844,7 +867,6 @@ public partial class MainWindow : Window
             profile.AccountId = session.AccountId;
             profile.AccountAccessToken = session.AccessToken;
             profile.AccountTokenExpiresAt = session.ExpiresAt;
-            profile.Token = session.FrpToken;
             if (string.IsNullOrWhiteSpace(profile.ControlApiUrl))
             {
                 profile.ControlApiUrl = platformUrl;
@@ -859,6 +881,43 @@ public partial class MainWindow : Window
 
         AppendLog(imported == 0 ? "节点配置已是最新。" : $"已自动载入 {imported} 个节点。");
         return session;
+    }
+
+    private async Task RefreshAuthorizedNodesAsync()
+    {
+        var source = _state.Profiles.FirstOrDefault(profile =>
+            profile.ServerManaged
+            && !string.IsNullOrWhiteSpace(profile.AccountAccessToken)
+            && profile.AccountTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1));
+        var platformUrl = string.IsNullOrWhiteSpace(_state.PlatformUrl)
+            ? source?.ControlApiUrl ?? ""
+            : _state.PlatformUrl;
+        if (source is null || string.IsNullOrWhiteSpace(platformUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            var document = await _controlClient.ExportNodesAsync(platformUrl, source.AccountAccessToken);
+            var session = new ClientAccountSession(
+                source.AccountId,
+                _state.AccountUsername,
+                source.AccountAccessToken,
+                source.AccountTokenExpiresAt,
+                "",
+                0,
+                "",
+                0,
+                0);
+            ImportNodeDocument(document, session);
+            SaveState();
+            AppendLog("已从控制平台刷新节点地址与认证信息。");
+        }
+        catch (Exception exception)
+        {
+            AppendLog($"节点自动同步失败：{exception.Message}");
+        }
     }
 
     private async Task CheckDesktopUpdateAsync(bool showNotification)
@@ -1898,8 +1957,15 @@ public partial class MainWindow : Window
         }
 
         var allocation = await _controlClient.AllocateAsync(profile, proxy);
-        profile.ServerAddr = allocation.ServerAddress;
-        profile.ServerPort = allocation.ServerPort;
+        if (string.IsNullOrWhiteSpace(profile.ManagedNodeId)
+            || !profile.ManagedNodeId.Equals(allocation.NodeId, StringComparison.Ordinal)
+            || !profile.ServerAddr.Equals(allocation.ServerAddress, StringComparison.OrdinalIgnoreCase)
+            || profile.ServerPort != allocation.ServerPort)
+        {
+            throw new InvalidOperationException(
+                $"服务端返回了不匹配的节点分配：期望 {profile.Name} ({profile.ServerAddr}:{profile.ServerPort})，"
+                + $"实际为 {allocation.NodeName} ({allocation.ServerAddress}:{allocation.ServerPort})。已拒绝切换节点。");
+        }
         proxy.RemotePort = allocation.RemotePort;
         proxy.AllocationId = allocation.AllocationId;
         proxy.RemotePortLocked = allocation.Locked;
@@ -1913,25 +1979,9 @@ public partial class MainWindow : Window
             return preferred;
         }
 
-        var candidates = new[] { preferred }
-            .Concat(_state.Profiles.Where(profile => profile.ServerManaged && !ReferenceEquals(profile, preferred)));
-        var failures = new List<string>();
-        foreach (var candidate in candidates)
-        {
-            try
-            {
-                await ApplyServerAllocationAsync(candidate, proxy);
-                ProxyProfileComboBox.SelectedItem = candidate;
-                return candidate;
-            }
-            catch (Exception exception)
-            {
-                failures.Add($"{candidate.Name}: {exception.Message}");
-            }
-        }
-
-        throw new InvalidOperationException(
-            "没有可用的托管节点。" + Environment.NewLine + string.Join(Environment.NewLine, failures));
+        await ApplyServerAllocationAsync(preferred, proxy);
+        ProxyProfileComboBox.SelectedItem = preferred;
+        return preferred;
     }
 
     private FrpProxy CreateDefaultEditorProxy()

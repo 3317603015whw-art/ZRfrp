@@ -62,7 +62,8 @@ public sealed class ZRfrpControlClient
             tunnelId = proxy.Id,
             proxyName = proxy.Name,
             proxyType = proxy.Type.ToLowerInvariant(),
-            bandwidthLimit = ""
+            bandwidthLimit = "",
+            nodeId = profile.ManagedNodeId
         };
         using var content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
         using var response = await client.PostAsync("api/client/allocate", content, cancellationToken);
@@ -90,7 +91,9 @@ public sealed class ZRfrpControlClient
             return;
         }
         using var client = CreateClient(profile);
-        using var response = await client.DeleteAsync($"api/client/allocations/{Uri.EscapeDataString(allocationId)}");
+        var nodeId = Uri.EscapeDataString(profile.ManagedNodeId ?? "");
+        using var response = await client.DeleteAsync(
+            $"api/client/allocations/{Uri.EscapeDataString(allocationId)}?nodeId={nodeId}");
         response.EnsureSuccessStatusCode();
     }
 
@@ -135,7 +138,8 @@ public sealed record ManagedAllocation(
     int ServerPort,
     int RemotePort,
     string BandwidthLimit,
-    bool Locked);
+    bool Locked,
+    string NodeId);
 
 public sealed record ClientAccountSession(
     string AccountId,
