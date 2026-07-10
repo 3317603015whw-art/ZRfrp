@@ -143,11 +143,14 @@ public sealed class FrpsManager
             return result;
         }
 
-        await Task.Delay(900);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        if (await IsReachableAsync(timeout.Token))
+        for (var attempt = 0; attempt < 10; attempt++)
         {
-            return result;
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            if (await IsReachableAsync(timeout.Token))
+            {
+                return result;
+            }
         }
 
         var status = await GetInstallStatusAsync(CancellationToken.None);

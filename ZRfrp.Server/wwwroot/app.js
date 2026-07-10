@@ -79,6 +79,10 @@ function decorateNodeNameInputs(){document.querySelectorAll(".node-name-edit").f
 const originalLoadNodes=loadNodes;
 loadNodes=async function(){await originalLoadNodes();decorateNodeNameInputs()};
 document.addEventListener("click",event=>{const button=event.target.closest(".node-save");if(!button)return;const input=document.querySelector('.node-name-edit[data-id="'+button.dataset.id+'"]');if(input?.dataset.leadingFlag==="JP"&&!input.value.startsWith("🇯🇵"))input.value="🇯🇵"+input.value},true);
+function reloadAfterServerUpdate(){setTimeout(()=>{const deadline=Date.now()+60000;const probe=async()=>{try{const response=await fetch("/api/session",{cache:"no-store"});if(response.ok){window.location.reload();return}}catch{}if(Date.now()<deadline)setTimeout(probe,1500)};probe()},5000)}
+async function applyServerUpdateFromPanel(){const status=$("#maintenance-update-status");try{status.textContent="正在下载更新，服务恢复后页面会自动刷新...";const result=await api("/api/update",{method:"POST"});status.textContent=result.message+" 正在等待服务恢复...";toast(result.message);reloadAfterServerUpdate()}catch(error){status.textContent=error.message;toast(error.message)}}
+$("#apply-server-update").onclick=applyServerUpdateFromPanel;
+$("#version-button").onclick=async()=>{if($("#version-button").dataset.available!=="true"){checkUpdate();return}await applyServerUpdateFromPanel()};
 async function loadRegistrationSettings(){try{const settings=await api("/api/admin/registration-settings");$("#registration-enabled").checked=settings.enabled;$("#registration-quota").value=Math.round((settings.defaultTrafficQuotaBytes||0)/1024**3);$("#registration-status").textContent=settings.enabled?"注册已开放":"注册已关闭"}catch(error){$("#registration-status").textContent=error.message}}
 const baseLoadAccounts=loadAccounts;
 loadAccounts=async function(){await baseLoadAccounts();await loadRegistrationSettings()};

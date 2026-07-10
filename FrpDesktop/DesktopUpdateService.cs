@@ -67,17 +67,26 @@ public sealed class DesktopUpdateService
             ?? throw new InvalidOperationException("无法确定当前程序路径。");
         var installDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var scriptPath = Path.Combine(updateDirectory, "apply-update.ps1");
-        var script = $"""
-param([int]$Pid)
-Wait-Process -Id $Pid -ErrorAction SilentlyContinue
-Copy-Item -Path '{Escape(extractDirectory)}\*' -Destination '{Escape(installDirectory)}' -Recurse -Force
-Start-Process -FilePath '{Escape(executable)}'
-""";
+        var script = string.Join(Environment.NewLine,
+        [
+            "param([int]$TargetProcessId)",
+            "$ErrorActionPreference = 'Stop'",
+            $"$logPath = '{Escape(Path.Combine(updateDirectory, "apply-update.log"))}'",
+            "try {",
+            "    Wait-Process -Id $TargetProcessId -ErrorAction SilentlyContinue",
+            "    Start-Sleep -Milliseconds 500",
+            $"    Copy-Item -Path '{Escape(extractDirectory)}\\*' -Destination '{Escape(installDirectory)}' -Recurse -Force",
+            $"    Start-Process -FilePath '{Escape(executable)}' -WorkingDirectory '{Escape(installDirectory)}'",
+            "    '更新完成。' | Set-Content -Path $logPath -Encoding UTF8",
+            "} catch {",
+            "    $_ | Out-File -Path $logPath -Encoding UTF8",
+            "}"
+        ]);
         await File.WriteAllTextAsync(scriptPath, script);
         Process.Start(new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" -Pid {Environment.ProcessId}",
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" -TargetProcessId {Environment.ProcessId}",
             UseShellExecute = true,
             WindowStyle = ProcessWindowStyle.Hidden
         });

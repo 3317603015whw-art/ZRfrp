@@ -614,9 +614,23 @@ app.MapPost("/api/admin/nodes/{id}/service/{action}", async (
         HttpMethod.Post, $"{node.ControlUrl.TrimEnd('/')}/api/peer/service/{action}");
     request.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
     using var response = await client.SendAsync(request);
-    return response.IsSuccessStatusCode
-        ? Results.Ok(new { message = $"节点 {node.Name} 已执行 {action}。" })
-        : Results.BadRequest(new { error = await response.Content.ReadAsStringAsync() });
+    if (response.IsSuccessStatusCode)
+    {
+        return Results.Ok(new { message = $"节点 {node.Name} 已执行 {action}。" });
+    }
+    var errorBody = await response.Content.ReadAsStringAsync();
+    try
+    {
+        using var document = JsonDocument.Parse(errorBody);
+        errorBody = document.RootElement.TryGetProperty("error", out var error)
+            ? error.GetString() ?? errorBody
+            : errorBody;
+    }
+    catch (JsonException)
+    {
+        // Keep the remote response when it is not JSON.
+    }
+    return Results.BadRequest(new { error = $"节点 {node.Name} 的 frps 操作失败：{errorBody}" });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapPost("/api/peer/heartbeat", async (
