@@ -908,25 +908,32 @@
                                        Foreground="{StaticResource MutedBrush}"
                                        FontSize="12"
                                        Margin="0,4,0,14" />
-                            <TextBlock Text="平台地址" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
-                            <TextBox x:Name="PlatformUrlTextBox" Margin="0,0,0,10" />
-                            <Grid Margin="0,0,0,12">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Margin="0,0,6,0">
-                                    <TextBlock Text="账号" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
-                                    <TextBox x:Name="AccountUsernameTextBox" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                                    <TextBlock Text="密码" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
-                                    <PasswordBox x:Name="AccountPasswordBox" />
-                                </StackPanel>
-                            </Grid>
-                            <Button Content="登录控制平台"
-                                    Style="{StaticResource PrimaryButton}"
-                                    Click="AccountLoginButton_Click" />
+                            <StackPanel x:Name="AccountLoginFormPanel">
+                                <TextBlock Text="平台地址" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
+                                <TextBox x:Name="PlatformUrlTextBox" Margin="0,0,0,10" />
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,6,0">
+                                        <TextBlock Text="账号" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
+                                        <TextBox x:Name="AccountUsernameTextBox" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                        <TextBlock Text="密码" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
+                                        <PasswordBox x:Name="AccountPasswordBox" />
+                                    </StackPanel>
+                                </Grid>
+                                <Button Content="登录控制平台"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Click="AccountLoginButton_Click" />
+                            </StackPanel>
+                            <Button x:Name="AccountLogoutButton"
+                                    Content="退出登录"
+                                    Visibility="Collapsed"
+                                    Style="{StaticResource DangerButton}"
+                                    Click="AccountLogoutButton_Click" />
                         </StackPanel>
                     </Border>
                     <Border Background="#0D1826"

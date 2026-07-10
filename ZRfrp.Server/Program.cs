@@ -199,6 +199,7 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, ServerOpt
         publicHost = PublicFrpsHost(serverOptions),
         bindPort = serverOptions.FrpsBindPort,
         localNodeName = LocalNodeName(store, serverOptions),
+        localNodeFlagCode = LocalNodeFlagCode(store, serverOptions),
         allocations = store.State.Allocations.Where(item => item.Active),
         audit = store.State.Audit.Take(30)
     });
@@ -474,7 +475,20 @@ app.MapGet("/api/admin/nodes", (StateStore store, ServerOptions serverOptions) =
     {
         node.Online = node.Online && node.LastSeen >= cutoff;
     }
-    return Results.Ok(store.State.Nodes);
+    return Results.Ok(store.State.Nodes.Select(node => new
+    {
+        node.Id,
+        name = PlainNodeName(node.Name),
+        flagCode = NodeFlagCode(node.FlagCode, node.Name),
+        node.PublicHost,
+        node.ControlUrl,
+        node.FrpsPort,
+        node.Online,
+        node.ActiveClients,
+        node.ActiveProxies,
+        node.LastSeen,
+        node.Version
+    }).ToArray());
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapPost("/api/admin/nodes/enrollment", async (
@@ -504,7 +518,9 @@ app.MapPost("/api/admin/nodes/enrollment", async (
     {
         Id = id,
         Name = name,
+        FlagCode = NodeFlagCode(request.FlagCode, name),
         PublicHost = publicHost,
+        PublicHostLocked = true,
         ControlUrl = $"http://{publicHost}:7600",
         FrpsPort = serverOptions.FrpsBindPort,
         Online = false,
@@ -526,15 +542,24 @@ app.MapGet("/api/admin/nodes/export", (
 app.MapPut("/api/admin/nodes/{id}", async (
     string id, NodeUpdateRequest request, StateStore store, ServerOptions serverOptions) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Name))
+    var name = PlainNodeName(request.Name);
+    var flagCode = NodeFlagCode(request.FlagCode, request.Name);
+    var publicHost = request.PublicHost?.Trim() ?? "";
+    if (string.IsNullOrWhiteSpace(name))
     {
         return Results.BadRequest(new { error = "节点名称不能为空。" });
     }
+    if (!string.IsNullOrWhiteSpace(publicHost)
+        && (publicHost.Any(char.IsWhiteSpace) || publicHost.Contains('/') || publicHost.Contains('\\')))
+    {
+        return Results.BadRequest(new { error = "公网地址格式无效。" });
+    }
     if (id.Equals("local", StringComparison.OrdinalIgnoreCase))
     {
-        store.State.LocalNodeName = request.Name.Trim();
+        store.State.LocalNodeName = name;
+        store.State.LocalNodeFlagCode = flagCode;
         await store.AuditAsync("node", $"更新本机节点名称为 {store.State.LocalNodeName}");
-        return Results.Ok(new { name = LocalNodeName(store, serverOptions) });
+        return Results.Ok(new { name = LocalNodeName(store, serverOptions), flagCode = LocalNodeFlagCode(store, serverOptions) });
     }
 
     var node = store.State.Nodes.FirstOrDefault(item => item.Id == id);
@@ -542,9 +567,34 @@ app.MapPut("/api/admin/nodes/{id}", async (
     {
         return Results.NotFound();
     }
-    node.Name = request.Name.Trim();
+    node.Name = name;
+    node.FlagCode = flagCode;
+    if (!string.IsNullOrWhiteSpace(publicHost))
+    {
+        node.PublicHost = publicHost;
+        node.ControlUrl = $"http://{publicHost}:7600";
+        node.PublicHostLocked = true;
+    }
     await store.AuditAsync("node", $"更新节点名称为 {node.Name}");
-    return Results.Ok(new { node.Name });
+    return Results.Ok(new { node.Name, node.FlagCode, node.PublicHost });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapDelete("/api/admin/nodes/{id}", async (string id, StateStore store) =>
+{
+    if (id.Equals("local", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { error = "本机节点不能删除。" });
+    }
+    var node = store.State.Nodes.FirstOrDefault(item => item.Id == id);
+    if (node is null)
+    {
+        return Results.NotFound();
+    }
+    store.State.Nodes.Remove(node);
+    store.State.RevokedNodeIds.Add(id);
+    store.State.Allocations.RemoveAll(item => item.NodeId == id);
+    await store.AuditAsync("node", $"已删除节点 {node.Name}，该节点将无法重新注册。");
+    return Results.Ok(new { message = "节点已删除。" });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapPost("/api/admin/nodes/{id}/service/{action}", async (
@@ -576,18 +626,31 @@ app.MapPost("/api/peer/heartbeat", async (
     {
         return Results.Unauthorized();
     }
+    if (store.State.RevokedNodeIds.Contains(heartbeat.Id, StringComparer.Ordinal))
+    {
+        return Results.StatusCode(StatusCodes.Status410Gone);
+    }
     var node = store.State.Nodes.FirstOrDefault(item => item.Id == heartbeat.Id);
     if (node is null)
     {
-        node = new ManagedNode { Id = heartbeat.Id, Name = heartbeat.Name };
+        node = new ManagedNode
+        {
+            Id = heartbeat.Id,
+            Name = PlainNodeName(heartbeat.Name),
+            PublicHost = heartbeat.PublicHost,
+            ControlUrl = heartbeat.ControlUrl
+        };
         store.State.Nodes.Add(node);
     }
     if (string.IsNullOrWhiteSpace(node.Name))
     {
-        node.Name = heartbeat.Name;
+        node.Name = PlainNodeName(heartbeat.Name);
     }
-    node.PublicHost = heartbeat.PublicHost;
-    node.ControlUrl = heartbeat.ControlUrl;
+    if (!node.PublicHostLocked)
+    {
+        node.PublicHost = heartbeat.PublicHost;
+        node.ControlUrl = heartbeat.ControlUrl;
+    }
     node.FrpsPort = heartbeat.FrpsPort;
     node.Online = heartbeat.Online;
     node.ActiveClients = heartbeat.ActiveClients;
@@ -863,7 +926,7 @@ static NodeExportDocument CreateNodeExport(StateStore store, ServerOptions optio
     {
         new(
             string.IsNullOrWhiteSpace(options.NodeId) ? "local" : options.NodeId,
-            LocalNodeName(store, options),
+            DecoratedNodeName(LocalNodeName(store, options), LocalNodeFlagCode(store, options)),
             PublicFrpsHost(options),
             options.FrpsBindPort,
             options.FrpAuthToken,
@@ -874,7 +937,9 @@ static NodeExportDocument CreateNodeExport(StateStore store, ServerOptions optio
         .Where(node => node.Online && node.LastSeen >= cutoff && !string.IsNullOrWhiteSpace(node.PublicHost))
         .Select(node => new NodeExportEntry(
             node.Id,
-            string.IsNullOrWhiteSpace(node.Name) ? node.Id : node.Name,
+            DecoratedNodeName(
+                string.IsNullOrWhiteSpace(node.Name) ? node.Id : node.Name,
+                NodeFlagCode(node.FlagCode, node.Name)),
             node.PublicHost,
             node.FrpsPort > 0 ? node.FrpsPort : options.FrpsBindPort,
             options.FrpAuthToken,
@@ -890,10 +955,13 @@ static string LocalNodeName(StateStore store, ServerOptions options)
 {
     if (!string.IsNullOrWhiteSpace(store.State.LocalNodeName))
     {
-        return store.State.LocalNodeName;
+        return PlainNodeName(store.State.LocalNodeName);
     }
-    return string.IsNullOrWhiteSpace(options.NodeName) ? "本机节点" : options.NodeName;
+    return PlainNodeName(string.IsNullOrWhiteSpace(options.NodeName) ? "本机节点" : options.NodeName);
 }
+
+static string LocalNodeFlagCode(StateStore store, ServerOptions options) =>
+    NodeFlagCode(store.State.LocalNodeFlagCode, store.State.LocalNodeName);
 
 static string ExternalBaseUrl(HttpContext context, ServerOptions options)
 {
@@ -954,6 +1022,57 @@ static string CreateNodeEnrollmentCommand(
 }
 
 static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'") + "'";
+
+static string NodeFlagCode(string? requestedCode, string? name)
+{
+    var code = (requestedCode ?? "").Trim().ToUpperInvariant();
+    if (code is "CN" or "JP" or "US" or "SG" or "HK" or "KR" or "DE" or "GB" or "FR")
+    {
+        return code;
+    }
+    var value = (name ?? "").TrimStart().Replace("️", "");
+    return value.StartsWith("🇨🇳", StringComparison.Ordinal) ? "CN"
+        : value.StartsWith("🇯🇵", StringComparison.Ordinal) ? "JP"
+        : value.StartsWith("🇺🇸", StringComparison.Ordinal) ? "US"
+        : value.StartsWith("🇸🇬", StringComparison.Ordinal) ? "SG"
+        : value.StartsWith("🇭🇰", StringComparison.Ordinal) ? "HK"
+        : value.StartsWith("🇰🇷", StringComparison.Ordinal) ? "KR"
+        : value.StartsWith("🇩🇪", StringComparison.Ordinal) ? "DE"
+        : value.StartsWith("🇬🇧", StringComparison.Ordinal) ? "GB"
+        : value.StartsWith("🇫🇷", StringComparison.Ordinal) ? "FR"
+        : "";
+}
+
+static string PlainNodeName(string? value)
+{
+    var name = (value ?? "").Trim();
+    foreach (var flag in new[] { "🇨🇳", "🇯🇵", "🇺🇸", "🇸🇬", "🇭🇰", "🇰🇷", "🇩🇪", "🇬🇧", "🇫🇷" })
+    {
+        if (name.Replace("️", "").StartsWith(flag, StringComparison.Ordinal))
+        {
+            return name[(flag.Length)..].TrimStart();
+        }
+    }
+    return name;
+}
+
+static string DecoratedNodeName(string name, string flagCode)
+{
+    var emoji = flagCode switch
+    {
+        "CN" => "🇨🇳",
+        "JP" => "🇯🇵",
+        "US" => "🇺🇸",
+        "SG" => "🇸🇬",
+        "HK" => "🇭🇰",
+        "KR" => "🇰🇷",
+        "DE" => "🇩🇪",
+        "GB" => "🇬🇧",
+        "FR" => "🇫🇷",
+        _ => ""
+    };
+    return string.IsNullOrWhiteSpace(emoji) ? PlainNodeName(name) : $"{emoji}{PlainNodeName(name)}";
+}
 
 static string ActionName(string action) => action switch
 {

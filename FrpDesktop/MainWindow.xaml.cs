@@ -746,10 +746,40 @@ public partial class MainWindow : Window
         var profile = _state.Profiles.FirstOrDefault(item =>
             !string.IsNullOrWhiteSpace(item.AccountAccessToken)
             && item.AccountTokenExpiresAt > DateTimeOffset.UtcNow);
-        AccountStatusText.Text = profile is null
+        var isLoggedIn = profile is not null;
+        AccountStatusText.Text = !isLoggedIn
             ? "未登录，登录后才能获取服务授权并启动连接。"
-            : $"已登录：{_state.AccountUsername}，授权有效至 {profile.AccountTokenExpiresAt.LocalDateTime:g}";
+            : $"已登录：{_state.AccountUsername}，授权有效至 {profile!.AccountTokenExpiresAt.LocalDateTime:g}";
         AccountStatusText.Foreground = profile is null ? LogWarningBrush : LogSuccessBrush;
+        AccountLoginFormPanel.Visibility = isLoggedIn ? Visibility.Collapsed : Visibility.Visible;
+        AccountLogoutButton.Visibility = isLoggedIn ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void AccountLogoutButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runner.IsRunning)
+        {
+            await StopRunnerAsync();
+        }
+
+        var managedProfiles = _state.Profiles.Where(profile => profile.ServerManaged).ToArray();
+        foreach (var profile in managedProfiles)
+        {
+            _state.Profiles.Remove(profile);
+        }
+
+        _state.PlatformUrl = "";
+        _state.AccountUsername = "";
+        _state.AccountLoginSkipped = false;
+        _selectedProfile = _state.Profiles.FirstOrDefault();
+        ProfilesList.SelectedItem = _selectedProfile;
+        ProxyProfileComboBox.Items.Refresh();
+        LoadProfile(_selectedProfile);
+        SaveState();
+        UpdateAccountStatus();
+        CloseOpenDialogs();
+        ShowFirstLoginDialog();
+        AppendLog("已退出控制平台账号，已移除此前授权的节点。");
     }
 
     private bool ShouldShowFirstLoginDialog()

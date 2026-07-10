@@ -50,7 +50,7 @@
       </nav>
       <div class="aside-foot">
         <span id="node-health" class="health"><i></i>检测中</span>
-        <button id="version-button" class="quiet">v2.1.8</button>
+        <button id="version-button" class="quiet">v2.1.9</button>
         <button id="logout" class="quiet">退出登录</button>
       </div>
     </aside>
@@ -100,6 +100,7 @@
           <form id="node-enrollment-form" class="form-grid hidden">
             <div class="config-grid">
               <label>节点名称<input id="node-enrollment-name" maxlength="64" placeholder="例如 JP 东京节点" required></label>
+              <label>国家或地区<select id="node-enrollment-flag"><option value="">无国旗</option><option value="CN">🇨🇳 中国</option><option value="JP">🇯🇵 日本</option><option value="US">🇺🇸 美国</option><option value="SG">🇸🇬 新加坡</option><option value="HK">🇭🇰 中国香港</option><option value="KR">🇰🇷 韩国</option><option value="DE">🇩🇪 德国</option><option value="GB">🇬🇧 英国</option><option value="FR">🇫🇷 法国</option></select></label>
               <label>节点公网地址<input id="node-enrollment-host" placeholder="例如 203.0.113.10 或 jp.example.com" required></label>
               <label class="wide">主控面板地址<input id="node-enrollment-master-url" type="url" required></label>
             </div>
@@ -234,5 +235,6 @@
   </div>
   <div id="toast"></div>
   <script src="/app.js"></script>
+  <script src="/nodes-ui.js"></script>
 </body>
 </html>

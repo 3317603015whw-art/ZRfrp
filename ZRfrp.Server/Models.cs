@@ -31,11 +31,13 @@ public sealed class ServerState
     public string AdminPasswordHash { get; set; } = "";
     public string ClientApiKeyHash { get; set; } = "";
     public string LocalNodeName { get; set; } = "";
+    public string LocalNodeFlagCode { get; set; } = "";
     public List<PortAllocation> Allocations { get; set; } = [];
     public List<AuditEntry> Audit { get; set; } = [];
     public List<UserAccount> Accounts { get; set; } = [];
     public List<AccountSession> AccountSessions { get; set; } = [];
     public List<ManagedNode> Nodes { get; set; } = [];
+    public List<string> RevokedNodeIds { get; set; } = [];
     public List<ManagedClient> Clients { get; set; } = [];
     public Dictionary<string, long> TrafficSnapshots { get; set; } = [];
     public bool RegistrationEnabled { get; set; } = true;
@@ -66,7 +68,9 @@ public sealed class ManagedNode
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
+    public string FlagCode { get; set; } = "";
     public string PublicHost { get; set; } = "";
+    public bool PublicHostLocked { get; set; }
     public string ControlUrl { get; set; } = "";
     public int FrpsPort { get; set; }
     public bool Online { get; set; }
@@ -109,13 +113,13 @@ public sealed record LoginRequest(string Username, string Password);
 public sealed record PasswordChangeRequest(string CurrentPassword, string NewPassword);
 public sealed record AccountRequest(string Username, string Password, string Role, long TrafficQuotaBytes, bool Enabled);
 public sealed record RegistrationSettingsRequest(bool Enabled, long DefaultTrafficQuotaBytes);
-public sealed record NodeEnrollmentRequest(string Name, string PublicHost, string MasterUrl);
+public sealed record NodeEnrollmentRequest(string Name, string PublicHost, string MasterUrl, string? FlagCode);
 public sealed record NodeEnrollmentResponse(string Id, string Name, string Command);
 public sealed record ClientLoginRequest(string Username, string Password, string ClientId);
 public sealed record ClientLoginResponse(
     string AccountId, string Username, string AccessToken, DateTimeOffset ExpiresAt,
     string ServerAddress, int ServerPort, string FrpToken, long TrafficQuotaBytes, long TrafficUsedBytes);
-public sealed record NodeUpdateRequest(string Name);
+public sealed record NodeUpdateRequest(string Name, string? FlagCode, string? PublicHost);
 public sealed record NodeExportDocument(
     string Kind,
     int Version,
