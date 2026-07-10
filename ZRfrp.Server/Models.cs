@@ -112,6 +112,7 @@ public sealed class PortAllocation
     public bool Active { get; set; } = true;
     public string AccountId { get; set; } = "";
     public string NodeId { get; set; } = "";
+    public string NodeName { get; set; } = "";
 }
 
 public sealed record AuditEntry(DateTimeOffset Time, string Action, string Detail);

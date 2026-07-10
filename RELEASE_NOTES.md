@@ -1,4 +1,11 @@
-# ZRfrp v2.1.18
+# ZRfrp v2.1.19
+
+- 安装和更新节点时强制同步控制面导出的 frp Token 与 `frps.toml`，修复 `token in login doesn't match token from configuration`。
+- 主控面板聚合所有在线远程节点的活动通道，并显示每条通道所属节点。
+- 主控释放远程通道时按节点 ID 转发到实际节点，不再只操作主节点本地租约。
+- 远程租约查询接口仅接受节点 Peer Key，避免暴露节点通道信息。
+
+## v2.1.18
 
 - 主控转发远程节点分配结果时，强制使用主控中登记并锁定的公网地址与 frps 端口，不再把云服务器内网地址返回桌面端。
 - 节点重装时将主控指定的公网地址持久化到 systemd 环境文件，覆盖历史 `appsettings.Production.json` 中错误的私网地址。

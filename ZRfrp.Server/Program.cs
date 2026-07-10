@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -14,6 +15,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = AppContext.BaseDirectory
 });
 var options = builder.Configuration.GetSection("ZRfrp").Get<ServerOptions>() ?? new();
+options.FrpAuthToken = ReadFrpsAuthToken(options.FrpsConfigPath, options.FrpAuthToken);
 var dataProtectionDirectory = Path.Combine(options.DataDirectory, "keys");
 Directory.CreateDirectory(dataProtectionDirectory);
 builder.Services.AddDataProtection()
@@ -240,7 +242,9 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, ServerOpt
     var httpTask = frps.GetDashboardJsonAsync("/api/proxy/http", cancellationToken);
     var httpsTask = frps.GetDashboardJsonAsync("/api/proxy/https", cancellationToken);
     var healthTask = frps.IsReachableAsync(cancellationToken);
-    await Task.WhenAll(serverTask, clientsTask, tcpTask, udpTask, httpTask, httpsTask, healthTask);
+    var allocationsTask = GetManagedAllocationsAsync(store, serverOptions, cancellationToken);
+    await Task.WhenAll(
+        serverTask, clientsTask, tcpTask, udpTask, httpTask, httpsTask, healthTask, allocationsTask);
     var frpsStatus = await frps.GetInstallStatusAsync(cancellationToken);
     var clientCutoff = DateTimeOffset.UtcNow.AddSeconds(-60);
     store.State.Clients.RemoveAll(client => client.LastSeen < clientCutoff);
@@ -269,7 +273,7 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, ServerOpt
         bindPort = serverOptions.FrpsBindPort,
         localNodeName = LocalNodeName(store, serverOptions),
         localNodeFlagCode = LocalNodeFlagCode(store, serverOptions),
-        allocations = store.State.Allocations.Where(item => item.Active),
+        allocations = allocationsTask.Result,
         audit = store.State.Audit.Take(30)
     });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
@@ -297,10 +301,46 @@ app.MapPost("/api/service/{action}", async (string action, FrpsManager frps, Sta
         : Results.BadRequest(new { error = result.Output });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
-app.MapGet("/api/allocations", (StateStore store) => Results.Ok(store.State.Allocations))
+app.MapGet("/api/allocations", async (
+    StateStore store, ServerOptions serverOptions, CancellationToken cancellationToken) =>
+    Results.Ok(await GetManagedAllocationsAsync(store, serverOptions, cancellationToken)))
     .RequireAuthorization(policy => policy.RequireRole("admin"));
-app.MapDelete("/api/allocations/{id}", async (string id, AllocationService allocations) =>
-    await allocations.ReleaseAsync(id) ? Results.Ok() : Results.NotFound())
+app.MapDelete("/api/allocations/{id}", async (
+    string id,
+    string? nodeId,
+    AllocationService allocations,
+    StateStore store,
+    ServerOptions serverOptions,
+    CancellationToken cancellationToken) =>
+{
+    var requestedNodeId = string.IsNullOrWhiteSpace(nodeId)
+        ? LocalNodeId(serverOptions)
+        : nodeId.Trim();
+    if (requestedNodeId.Equals(LocalNodeId(serverOptions), StringComparison.Ordinal))
+    {
+        return await allocations.ReleaseAsync(id) ? Results.Ok() : Results.NotFound();
+    }
+
+    var node = store.State.Nodes.FirstOrDefault(item =>
+        item.Id.Equals(requestedNodeId, StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(item.ControlUrl));
+    if (node is null)
+    {
+        return Results.NotFound();
+    }
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+    using var request = new HttpRequestMessage(
+        HttpMethod.Delete,
+        $"{node.ControlUrl.TrimEnd('/')}/api/peer/allocations/{Uri.EscapeDataString(id)}");
+    request.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
+    using var response = await client.SendAsync(request, cancellationToken);
+    if (!response.IsSuccessStatusCode)
+    {
+        return Results.StatusCode((int)response.StatusCode);
+    }
+    await store.AuditAsync("release", $"释放远程节点 {node.Name} 的租约 {id}");
+    return Results.Ok();
+})
     .RequireAuthorization(policy => policy.RequireRole("admin"));
 
 app.MapPost("/api/admin/password", async (
@@ -829,6 +869,16 @@ app.MapPost("/api/peer/allocate", async (
         : Results.BadRequest(new { error = result.Error });
 });
 
+app.MapGet("/api/peer/allocations", (
+    HttpContext context, StateStore store, ServerOptions serverOptions) =>
+{
+    if (!ValidatePeerKey(context, serverOptions.PeerKey))
+    {
+        return Results.Unauthorized();
+    }
+    return Results.Ok(store.State.Allocations.Where(item => item.Active).ToArray());
+});
+
 app.MapDelete("/api/peer/allocations/{id}", async (
     string id, HttpContext context, AllocationService allocations, ServerOptions serverOptions) =>
 {
@@ -1073,6 +1123,28 @@ static bool HasClientKey(HttpContext context, string hash)
     return !string.IsNullOrWhiteSpace(key) && Security.Verify(key, hash);
 }
 
+static string ReadFrpsAuthToken(string configPath, string fallback)
+{
+    try
+    {
+        if (!File.Exists(configPath))
+        {
+            return fallback;
+        }
+        var text = File.ReadAllText(configPath);
+        var match = Regex.Match(
+            text,
+            @"(?m)^\s*auth\.token\s*=\s*""(?<value>(?:\\.|[^""])*)""");
+        return match.Success
+            ? match.Groups["value"].Value.Replace("\\\"", "\"")
+            : fallback;
+    }
+    catch
+    {
+        return fallback;
+    }
+}
+
 static UserAccount? GetBearerAccount(HttpContext context, AccountService accounts)
 {
     var authorization = context.Request.Headers.Authorization.ToString();
@@ -1245,6 +1317,67 @@ static NodeExportDocument CreateNodeExport(StateStore store, ServerOptions optio
             platformUrl)));
 
     return new NodeExportDocument("zrfrp-node-export", 1, platformUrl, DateTimeOffset.UtcNow, nodes);
+}
+
+static async Task<List<PortAllocation>> GetManagedAllocationsAsync(
+    StateStore store, ServerOptions options, CancellationToken cancellationToken)
+{
+    var localNodeId = LocalNodeId(options);
+    var localNodeName = LocalNodeName(store, options);
+    var result = store.State.Allocations.Where(item => item.Active).ToList();
+    foreach (var allocation in result)
+    {
+        if (string.IsNullOrWhiteSpace(allocation.NodeId))
+        {
+            allocation.NodeId = localNodeId;
+        }
+        if (string.IsNullOrWhiteSpace(allocation.NodeName))
+        {
+            allocation.NodeName = localNodeName;
+        }
+    }
+
+    var cutoff = DateTimeOffset.UtcNow.AddSeconds(-45);
+    var nodes = store.State.Nodes.Where(node =>
+        node.Online && node.LastSeen >= cutoff && !string.IsNullOrWhiteSpace(node.ControlUrl)).ToArray();
+    if (nodes.Length == 0)
+    {
+        return result;
+    }
+
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+    var tasks = nodes.Select(async node =>
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get, node.ControlUrl.TrimEnd('/') + "/api/peer/allocations");
+            request.Headers.Add("X-ZRfrp-Peer-Key", options.PeerKey);
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return Array.Empty<PortAllocation>();
+            }
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var allocations = JsonSerializer.Deserialize<PortAllocation[]>(
+                body, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+            foreach (var allocation in allocations)
+            {
+                allocation.NodeId = node.Id;
+                allocation.NodeName = string.IsNullOrWhiteSpace(node.Name) ? node.Id : node.Name;
+            }
+            return allocations;
+        }
+        catch
+        {
+            return Array.Empty<PortAllocation>();
+        }
+    });
+    foreach (var allocations in await Task.WhenAll(tasks))
+    {
+        result.AddRange(allocations);
+    }
+    return result;
 }
 
 static string PublicFrpsHost(ServerOptions options) =>

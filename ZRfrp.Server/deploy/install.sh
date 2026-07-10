@@ -79,6 +79,15 @@ if [[ ! -f /etc/zrfrp/frps.toml ]]; then
   sed -i "0,/CHANGE_ME/s//${DASHBOARD_PASSWORD}/" /etc/zrfrp/frps.toml
 fi
 
+# The control plane exports this token to clients, so the running frps config
+# must always use the same value, including after re-enrollment or upgrades.
+if grep -Eq '^[[:space:]]*auth\.token[[:space:]]*=' /etc/zrfrp/frps.toml; then
+  sed -i -E 's|^[[:space:]]*auth\.token[[:space:]]*=.*$|auth.token = "'"${FRP_TOKEN}"'"|' \
+    /etc/zrfrp/frps.toml
+else
+  printf '\nauth.method = "token"\nauth.token = "%s"\n' "${FRP_TOKEN}" >>/etc/zrfrp/frps.toml
+fi
+
 cat >/etc/zrfrp/zrfrp.env <<EOF
 ZRFRP_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 ZRFRP_CLIENT_API_KEY=${CLIENT_KEY}

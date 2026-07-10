@@ -52,6 +52,7 @@ public sealed class AllocationService
             if (existing is not null)
             {
                 existing.NodeId = nodeId;
+                existing.NodeName = LocalNodeName();
                 existing.BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant();
                 existing.ProxyName = request.ProxyName;
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
@@ -78,7 +79,8 @@ public sealed class AllocationService
                 RemotePort = port,
                 BandwidthLimit = request.BandwidthLimit.Trim().ToUpperInvariant(),
                 AccountId = account?.Id ?? "",
-                NodeId = nodeId
+                NodeId = nodeId,
+                NodeName = LocalNodeName()
             };
             _store.State.Allocations.Add(allocation);
             await _store.AuditAsync("allocate", $"{request.ClientId}/{request.ProxyName} -> {port}");
@@ -123,6 +125,9 @@ public sealed class AllocationService
 
     private string LocalNodeId() =>
         string.IsNullOrWhiteSpace(_options.NodeId) ? "local" : _options.NodeId;
+
+    private string LocalNodeName() =>
+        string.IsNullOrWhiteSpace(_options.NodeName) ? Environment.MachineName : _options.NodeName;
 
     private static bool IsPortAvailable(int port, string type)
     {
