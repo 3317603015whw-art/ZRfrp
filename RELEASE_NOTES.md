@@ -1,4 +1,9 @@
-# ZRfrp v2.1.12
+# ZRfrp v2.1.13
+
+- 强制所有 Linux Shell 脚本使用 Unix LF 换行，修复新节点安装时报 `invalid option name: pipefail`。
+- 重新构建主控中转安装包，避免向新节点发放带 CRLF 的安装脚本。
+
+## v2.1.12
 
 - Desktop 更新时主动关闭全部窗口并退出应用；外部更新器增加进程超时终止兜底，确保替换后自动重启。
 - 新增主控中转节点安装：新节点仅访问主控，Server 与 frps 包由主控从 GitHub 缓存后转发。
