@@ -14,7 +14,7 @@ public sealed record DesktopUpdateInfo(
 public sealed class DesktopUpdateService
 {
     private const string LatestReleaseUrl =
-        "https://api.github.com/repos/3317603015whw-art/ZRfrp/releases/latest";
+        "https://api.github.com/repos/masZR-art/ZRfrp/releases/latest";
     private readonly HttpClient _http = new(new HttpClientHandler { UseProxy = false })
     {
         Timeout = TimeSpan.FromSeconds(20)

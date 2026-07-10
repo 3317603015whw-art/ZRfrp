@@ -5,7 +5,7 @@ namespace ZRfrp.Server;
 
 public sealed class UpdateService
 {
-    private const string ReleasesUrl = "https://api.github.com/repos/3317603015whw-art/ZRfrp/releases/latest";
+    private const string ReleasesUrl = "https://api.github.com/repos/masZR-art/ZRfrp/releases/latest";
     private readonly HttpClient _http;
 
     public UpdateService()

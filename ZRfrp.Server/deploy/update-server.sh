@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPOSITORY="${ZRFRP_REPOSITORY:-3317603015whw-art/ZRfrp}"
+REPOSITORY="${ZRFRP_REPOSITORY:-masZR-art/ZRfrp}"
 VERSION="${ZRFRP_VERSION:-latest}"
 
 case "$(uname -m)" in
