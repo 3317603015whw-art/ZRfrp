@@ -13,6 +13,12 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (DesktopUpdateService.IsStagedUpdaterCommand(e.Args))
+        {
+            Environment.Exit(DesktopUpdateService.RunStagedUpdater(e.Args));
+            return;
+        }
+
         _singleInstanceMutex = new Mutex(true, "Local\\ZRfrpDesktopSingleInstance", out _ownsSingleInstanceMutex);
         if (!_ownsSingleInstanceMutex)
         {

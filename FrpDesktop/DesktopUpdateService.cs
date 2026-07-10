@@ -22,7 +22,8 @@ public sealed class DesktopUpdateService
 
     public DesktopUpdateService()
     {
-        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ZRfrp-Desktop", CurrentVersion));
+        _http.DefaultRequestHeaders.UserAgent.Add(
+            new ProductInfoHeaderValue("ZRfrp-Desktop", CurrentVersion));
     }
 
     public static string CurrentVersion =>
@@ -33,7 +34,8 @@ public sealed class DesktopUpdateService
         using var response = await _http.GetAsync(LatestReleaseUrl);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var latest = (document.RootElement.GetProperty("tag_name").GetString() ?? "v0.0.0").TrimStart('v');
+        var latest = (document.RootElement.GetProperty("tag_name").GetString() ?? "v0.0.0")
+            .TrimStart('v');
         var asset = document.RootElement.GetProperty("assets").EnumerateArray()
             .FirstOrDefault(item =>
                 (item.GetProperty("name").GetString() ?? "")
@@ -55,6 +57,7 @@ public sealed class DesktopUpdateService
             Directory.Delete(extractDirectory, true);
         }
         Directory.CreateDirectory(extractDirectory);
+
         var archivePath = Path.Combine(updateDirectory, "update.zip");
         await using (var source = await _http.GetStreamAsync(update.DownloadUrl))
         await using (var target = File.Create(archivePath))
@@ -63,43 +66,199 @@ public sealed class DesktopUpdateService
         }
         ZipFile.ExtractToDirectory(archivePath, extractDirectory, true);
 
-        var executable = Environment.ProcessPath
-            ?? throw new InvalidOperationException("无法确定当前程序路径。");
         var installDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-        var scriptPath = Path.Combine(updateDirectory, "apply-update.ps1");
-        var script = string.Join(Environment.NewLine,
-        [
-            "param([int]$TargetProcessId)",
-            "$ErrorActionPreference = 'Stop'",
-            $"$logPath = '{Escape(Path.Combine(updateDirectory, "apply-update.log"))}'",
-            "try {",
-            "    for ($attempt = 0; $attempt -lt 150; $attempt++) {",
-            "        if (-not (Get-Process -Id $TargetProcessId -ErrorAction SilentlyContinue)) { break }",
-            "        Start-Sleep -Milliseconds 200",
-            "    }",
-            "    if (Get-Process -Id $TargetProcessId -ErrorAction SilentlyContinue) {",
-            "        Stop-Process -Id $TargetProcessId -Force",
-            "        Start-Sleep -Milliseconds 500",
-            "    }",
-            "    Start-Sleep -Milliseconds 500",
-            $"    Copy-Item -Path '{Escape(extractDirectory)}\\*' -Destination '{Escape(installDirectory)}' -Recurse -Force",
-            $"    Start-Process -FilePath '{Escape(executable)}' -WorkingDirectory '{Escape(installDirectory)}'",
-            "    '更新完成。' | Set-Content -Path $logPath -Encoding UTF8",
-            "} catch {",
-            "    $_ | Out-File -Path $logPath -Encoding UTF8",
-            "}"
-        ]);
-        await File.WriteAllTextAsync(scriptPath, script);
-        Process.Start(new ProcessStartInfo
+        var executableName = Path.GetFileName(Environment.ProcessPath);
+        if (string.IsNullOrWhiteSpace(executableName))
         {
-            FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" -TargetProcessId {Environment.ProcessId}",
-            UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        });
+            executableName = "ZRfrp.exe";
+        }
+        var stagedExecutable = Path.Combine(extractDirectory, executableName);
+        if (!File.Exists(stagedExecutable))
+        {
+            stagedExecutable = Path.Combine(extractDirectory, "ZRfrp.exe");
+        }
+        if (!File.Exists(stagedExecutable))
+        {
+            throw new InvalidDataException("更新包中缺少 ZRfrp.exe。");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = stagedExecutable,
+            WorkingDirectory = extractDirectory,
+            UseShellExecute = true
+        };
+        if (!CanWriteToDirectory(installDirectory))
+        {
+            startInfo.Verb = "runas";
+        }
+        startInfo.ArgumentList.Add("--apply-update");
+        startInfo.ArgumentList.Add("--target-process-id");
+        startInfo.ArgumentList.Add(Environment.ProcessId.ToString());
+        startInfo.ArgumentList.Add("--install-directory");
+        startInfo.ArgumentList.Add(installDirectory);
+        startInfo.ArgumentList.Add("--executable-name");
+        startInfo.ArgumentList.Add(Path.GetFileName(stagedExecutable));
+        startInfo.ArgumentList.Add("--update-log");
+        startInfo.ArgumentList.Add(Path.Combine(updateDirectory, "apply-update.log"));
+        _ = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("无法启动独立更新进程。");
     }
 
-    private static string Escape(string value) => value.Replace("'", "''");
+    public static bool IsStagedUpdaterCommand(IReadOnlyList<string> arguments) =>
+        arguments.Any(argument =>
+            argument.Equals("--apply-update", StringComparison.OrdinalIgnoreCase));
+
+    public static int RunStagedUpdater(IReadOnlyList<string> arguments)
+    {
+        var values = ParseUpdaterArguments(arguments);
+        var logPath = values.GetValueOrDefault("--update-log")
+            ?? Path.Combine(Path.GetTempPath(), "zrfrp-update.log");
+        var installDirectory = values.GetValueOrDefault("--install-directory") ?? "";
+        var executableName = values.GetValueOrDefault("--executable-name") ?? "ZRfrp.exe";
+        var targetExecutable = Path.Combine(installDirectory, executableName);
+
+        try
+        {
+            if (!int.TryParse(values.GetValueOrDefault("--target-process-id"), out var processId)
+                || processId <= 0 || string.IsNullOrWhiteSpace(installDirectory))
+            {
+                throw new InvalidDataException("更新器启动参数无效。");
+            }
+
+            WaitForTargetExit(processId);
+            CopyUpdateFiles(AppContext.BaseDirectory, installDirectory);
+            if (!File.Exists(targetExecutable))
+            {
+                throw new FileNotFoundException("更新后找不到主程序。", targetExecutable);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? Path.GetTempPath());
+            File.WriteAllText(logPath, $"更新完成：{DateTimeOffset.Now:O}{Environment.NewLine}");
+            StartInstalledApplication(targetExecutable, installDirectory);
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? Path.GetTempPath());
+                File.WriteAllText(logPath, exception.ToString());
+            }
+            catch
+            {
+                // Preserve the original updater failure.
+            }
+
+            // A failed update must not leave the application silently closed.
+            try
+            {
+                if (File.Exists(targetExecutable))
+                {
+                    StartInstalledApplication(targetExecutable, installDirectory);
+                }
+            }
+            catch
+            {
+                // The updater log remains available for diagnosis.
+            }
+            return 1;
+        }
+    }
+
+    private static Dictionary<string, string> ParseUpdaterArguments(IReadOnlyList<string> arguments)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index + 1 < arguments.Count; index++)
+        {
+            if (arguments[index].StartsWith("--", StringComparison.Ordinal)
+                && !arguments[index].Equals("--apply-update", StringComparison.OrdinalIgnoreCase))
+            {
+                result[arguments[index]] = arguments[++index];
+            }
+        }
+        return result;
+    }
+
+    private static void WaitForTargetExit(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!process.WaitForExit(45_000))
+            {
+                process.Kill(true);
+                process.WaitForExit(10_000);
+            }
+        }
+        catch (ArgumentException)
+        {
+            // The old application already exited.
+        }
+    }
+
+    private static void CopyUpdateFiles(string sourceDirectory, string installDirectory)
+    {
+        Directory.CreateDirectory(installDirectory);
+        foreach (var source in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(sourceDirectory, source);
+            var destination = Path.Combine(installDirectory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? installDirectory);
+
+            Exception? lastError = null;
+            for (var attempt = 0; attempt < 40; attempt++)
+            {
+                try
+                {
+                    File.Copy(source, destination, true);
+                    lastError = null;
+                    break;
+                }
+                catch (IOException exception)
+                {
+                    lastError = exception;
+                    Thread.Sleep(250);
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    lastError = exception;
+                    Thread.Sleep(250);
+                }
+            }
+            if (lastError is not null)
+            {
+                throw new IOException($"无法更新文件 {relativePath}。", lastError);
+            }
+        }
+    }
+
+    private static void StartInstalledApplication(string executable, string workingDirectory) =>
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = true
+        });
+
+    private static bool CanWriteToDirectory(string directory)
+    {
+        try
+        {
+            var probe = Path.Combine(directory, $".zrfrp-update-{Guid.NewGuid():N}.tmp");
+            using (new FileStream(
+                       probe, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                       1, FileOptions.DeleteOnClose))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static int Compare(string left, string right)
     {
         _ = Version.TryParse(left, out var leftVersion);
