@@ -261,7 +261,7 @@ app.MapPost("/api/client/login", async (
     ClientLoginRequest request, AccountService accounts, ServerOptions serverOptions) =>
 {
     var account = accounts.ValidatePassword(request.Username ?? "", request.Password ?? "");
-    if (account is null || account.Role != "customer")
+    if (account is null)
     {
         return Results.Json(new { error = "账号或密码错误。" }, statusCode: 401);
     }

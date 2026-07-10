@@ -12,8 +12,8 @@ async function api(path,options={}){
   const text=await response.text();let body={};try{body=text?JSON.parse(text):{}}catch{body={error:text}}
   if(!response.ok)throw new Error(body.error||`请求失败 (${response.status})`);return body;
 }
-function showLogin(){$("#app").classList.add("hidden");$("#register-form").classList.add("hidden");$("#login").classList.remove("hidden")}
-function showRegister(){$("#login").classList.add("hidden");$("#register-form").classList.remove("hidden")}
+function showLogin(){$("#app").classList.add("hidden");$("#register-form").classList.add("hidden");$("#login-form").classList.remove("hidden");$("#login").classList.remove("hidden")}
+function showRegister(){$("#login-form").classList.add("hidden");$("#register-form").classList.remove("hidden");$("#login").classList.remove("hidden")}
 function showApp(role){$("#login").classList.add("hidden");$("#app").classList.remove("hidden");$$(".admin-only").forEach(x=>x.classList.toggle("hidden",role!=="admin"));$$(".customer-only").forEach(x=>x.classList.toggle("hidden",role!=="customer"));openPage(role==="admin"?"overview":"customer")}
 function openPage(page){$$(".nav,.page").forEach(x=>x.classList.remove("active"));const nav=$(`.nav[data-page="${page}"]`);if(nav)nav.classList.add("active");$("#page-"+page).classList.add("active");[$("#page-title").textContent,$("#page-subtitle").textContent]=titles[page];if(page==="config")loadConfigModel();if(page==="accounts")loadAccounts();if(page==="customer")loadCustomer();if(page==="nodes")loadNodes();if(page==="maintenance")loadMaintenance()}
 function toast(message){const box=$("#toast");box.textContent=message;box.classList.add("show");setTimeout(()=>box.classList.remove("show"),2400)}
