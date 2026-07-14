@@ -854,12 +854,13 @@ public partial class MainWindow : Window
 
     private async Task<ClientAccountSession> LoginAndSyncNodesAsync(string platformUrl, string username, string password)
     {
-        var session = await _controlClient.LoginAsync(platformUrl, username, password, Environment.MachineName);
-        _state.PlatformUrl = platformUrl;
+        var normalizedPlatformUrl = ZRfrpControlClient.NormalizePlatformUrl(platformUrl);
+        var session = await _controlClient.LoginAsync(normalizedPlatformUrl, username, password, Environment.MachineName);
+        _state.PlatformUrl = normalizedPlatformUrl;
         _state.AccountUsername = session.Username;
         _state.AccountLoginSkipped = false;
 
-        var document = await _controlClient.ExportNodesAsync(platformUrl, session.AccessToken);
+        var document = await _controlClient.ExportNodesAsync(normalizedPlatformUrl, session.AccessToken);
         var imported = ImportNodeDocument(document, session);
 
         foreach (var profile in _state.Profiles.Where(item => item.ServerManaged))
@@ -867,10 +868,9 @@ public partial class MainWindow : Window
             profile.AccountId = session.AccountId;
             profile.AccountAccessToken = session.AccessToken;
             profile.AccountTokenExpiresAt = session.ExpiresAt;
-            if (string.IsNullOrWhiteSpace(profile.ControlApiUrl))
-            {
-                profile.ControlApiUrl = platformUrl;
-            }
+            // Keep using the address the user successfully logged in through even
+            // when a reverse proxy does not forward its public Host header.
+            profile.ControlApiUrl = normalizedPlatformUrl;
         }
 
         if (_selectedProfile is null && _state.Profiles.Count > 0)
@@ -2194,60 +2194,68 @@ public partial class MainWindow : Window
             return;
         }
 
-        var address = BuildProxyConnectionAddress(_selectedProfile, proxy);
-        if (string.IsNullOrWhiteSpace(address))
+        var addresses = BuildProxyConnectionAddresses(_selectedProfile, proxy);
+        if (addresses.Count == 0)
         {
             return;
         }
 
-        var announceKey = $"{_selectedProfile.Id}:{proxy.Name}:{address}";
+        var announceKey = $"{_selectedProfile.Id}:{proxy.Name}:{string.Join('|', addresses.Select(item => item.Address))}";
         if (!_announcedProxyAddresses.Add(announceKey))
         {
             return;
         }
 
-        AddProxySuccessLine(proxy.Name, address);
+        AddProxySuccessLines(proxy.Name, addresses);
     }
 
-    private void AddProxySuccessLine(string proxyName, string address)
+    private void AddProxySuccessLines(string proxyName, IReadOnlyList<ProxyConnectionAddress> addresses)
     {
-        var message = $"{proxyName} 隧道开启成功，可以通过 ";
-
-        _logBuffer.Append('[')
-            .Append(DateTime.Now.ToString("HH:mm:ss"))
-            .Append("] ")
-            .Append(message)
-            .Append('>')
-            .Append(address)
-            .AppendLine("< 进行连接");
-
-        var paragraph = CreateLogParagraph();
-        paragraph.Inlines.Add(CreateTimestampRun());
-        paragraph.Inlines.Add(new Run(message)
+        for (var index = 0; index < addresses.Count; index++)
         {
-            Foreground = LogSuccessBrush
-        });
-        paragraph.Inlines.Add(new Run(">")
-        {
-            Foreground = LogNoticeBrush
-        });
+            var item = addresses[index];
+            var message = item.IsDomain
+                ? $"{proxyName} 隧道开启成功，推荐使用域名地址 "
+                : index > 0
+                    ? "IP 地址（不推荐使用） "
+                    : $"{proxyName} 隧道开启成功，可以通过 ";
 
-        var hyperlink = new Hyperlink(new Run(address))
-        {
-            Foreground = LogNoticeBrush,
-            Cursor = WpfCursors.Hand,
-            Tag = address,
-            TextDecorations = TextDecorations.Underline
-        };
-        hyperlink.Click += CopyAddressHyperlink_Click;
-        paragraph.Inlines.Add(hyperlink);
+            _logBuffer.Append('[')
+                .Append(DateTime.Now.ToString("HH:mm:ss"))
+                .Append("] ")
+                .Append(message)
+                .Append('>')
+                .Append(item.Address)
+                .AppendLine("< 进行连接");
 
-        paragraph.Inlines.Add(new Run("< 进行连接")
-        {
-            Foreground = LogSuccessBrush
-        });
+            var paragraph = CreateLogParagraph();
+            paragraph.Inlines.Add(CreateTimestampRun());
+            paragraph.Inlines.Add(new Run(message)
+            {
+                Foreground = item.Recommended ? LogSuccessBrush : LogWarningBrush
+            });
+            paragraph.Inlines.Add(new Run(">")
+            {
+                Foreground = LogNoticeBrush
+            });
 
-        AppendLogParagraph(paragraph);
+            var hyperlink = new Hyperlink(new Run(item.Address))
+            {
+                Foreground = LogNoticeBrush,
+                Cursor = WpfCursors.Hand,
+                Tag = item.Address,
+                TextDecorations = TextDecorations.Underline
+            };
+            hyperlink.Click += CopyAddressHyperlink_Click;
+            paragraph.Inlines.Add(hyperlink);
+
+            paragraph.Inlines.Add(new Run("< 进行连接")
+            {
+                Foreground = item.Recommended ? LogSuccessBrush : LogWarningBrush
+            });
+
+            AppendLogParagraph(paragraph);
+        }
     }
 
     private static Paragraph CreateLogParagraph()
@@ -2315,12 +2323,25 @@ public partial class MainWindow : Window
         return LogInfoBrush;
     }
 
-    private static string BuildProxyConnectionAddress(FrpProfile profile, FrpProxy proxy)
+    private static IReadOnlyList<ProxyConnectionAddress> BuildProxyConnectionAddresses(FrpProfile profile, FrpProxy proxy)
     {
         var type = proxy.Type.Trim().ToLowerInvariant();
         if ((type is "tcp" or "udp") && proxy.RemotePort > 0)
         {
-            return $"{profile.ServerAddr}:{proxy.RemotePort}";
+            var addresses = new List<ProxyConnectionAddress>();
+            if (Uri.TryCreate(profile.ControlApiUrl, UriKind.Absolute, out var platformUri)
+                && platformUri.Scheme is "http" or "https"
+                && !System.Net.IPAddress.TryParse(platformUri.Host, out _))
+            {
+                addresses.Add(new($"{platformUri.Host}:{proxy.RemotePort}", true, true));
+            }
+
+            var serverAddress = $"{profile.ServerAddr}:{proxy.RemotePort}";
+            if (!addresses.Any(item => item.Address.Equals(serverAddress, StringComparison.OrdinalIgnoreCase)))
+            {
+                addresses.Add(new(serverAddress, addresses.Count == 0, false));
+            }
+            return addresses;
         }
 
         if ((type is "http" or "https") && !string.IsNullOrWhiteSpace(proxy.CustomDomains))
@@ -2329,12 +2350,16 @@ public partial class MainWindow : Window
                 .FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(domain))
             {
-                return type == "https" ? $"https://{domain}" : $"http://{domain}";
+                return [new(type == "https" ? $"https://{domain}" : $"http://{domain}", true, true)];
             }
         }
 
-        return proxy.RemotePort > 0 ? $"{profile.ServerAddr}:{proxy.RemotePort}" : string.Empty;
+        return proxy.RemotePort > 0
+            ? [new($"{profile.ServerAddr}:{proxy.RemotePort}", true, false)]
+            : [];
     }
+
+    private sealed record ProxyConnectionAddress(string Address, bool Recommended, bool IsDomain);
 
     private void CopyAddressHyperlink_Click(object sender, RoutedEventArgs e)
     {

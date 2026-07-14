@@ -12,10 +12,7 @@ public sealed class ZRfrpControlClient
         string platformUrl, string username, string password, string clientId,
         CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(platformUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseAddress))
-        {
-            throw new InvalidOperationException("控制平台地址无效。");
-        }
+        var baseAddress = CreatePlatformUri(platformUrl);
         using var client = CreateHttpClient(baseAddress);
         var payload = JsonSerializer.Serialize(new { username, password, clientId }, JsonOptions);
         using var response = await client.PostAsync(
@@ -33,10 +30,7 @@ public sealed class ZRfrpControlClient
     public async Task<NodeExportDocument> ExportNodesAsync(
         string platformUrl, string accessToken, CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(platformUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseAddress))
-        {
-            throw new InvalidOperationException("控制平台地址无效。");
-        }
+        var baseAddress = CreatePlatformUri(platformUrl);
         using var client = CreateHttpClient(baseAddress);
         client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
@@ -99,10 +93,7 @@ public sealed class ZRfrpControlClient
 
     private static HttpClient CreateClient(FrpProfile profile)
     {
-        if (!Uri.TryCreate(profile.ControlApiUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseAddress))
-        {
-            throw new InvalidOperationException("ZRfrp Server 面板地址无效。");
-        }
+        var baseAddress = CreatePlatformUri(profile.ControlApiUrl);
         if (string.IsNullOrWhiteSpace(profile.ControlApiKey)
             && string.IsNullOrWhiteSpace(profile.AccountAccessToken))
         {
@@ -127,6 +118,27 @@ public sealed class ZRfrpControlClient
             BaseAddress = baseAddress,
             Timeout = TimeSpan.FromSeconds(10)
         };
+
+    public static string NormalizePlatformUrl(string platformUrl) =>
+        CreatePlatformUri(platformUrl).ToString().TrimEnd('/');
+
+    private static Uri CreatePlatformUri(string platformUrl)
+    {
+        var value = platformUrl.Trim();
+        if (!value.Contains("://", StringComparison.Ordinal))
+        {
+            value = "https://" + value;
+        }
+
+        if (!Uri.TryCreate(value.TrimEnd('/') + "/", UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(uri.Host))
+        {
+            throw new InvalidOperationException("控制平台地址无效，请填写域名或 HTTP/HTTPS 地址。");
+        }
+
+        return uri;
+    }
 
     private sealed record ControlError(string Error);
 }
