@@ -21,7 +21,10 @@ public sealed class AccountService
         UserAccount account)
     {
         var token = Security.CreateSecret(32);
-        var expiresAt = DateTimeOffset.UtcNow.AddHours(Math.Max(1, _options.SessionHours));
+        var configuredHours = _store.State.SessionHours > 0
+            ? _store.State.SessionHours
+            : _options.SessionHours;
+        var expiresAt = DateTimeOffset.UtcNow.AddHours(Math.Clamp(configuredHours, 1, 8760));
         _store.State.AccountSessions.RemoveAll(session => session.ExpiresAt <= DateTimeOffset.UtcNow);
         _store.State.AccountSessions.Add(new AccountSession
         {

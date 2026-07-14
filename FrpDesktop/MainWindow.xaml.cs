@@ -785,10 +785,11 @@ public partial class MainWindow : Window
             await StopRunnerAsync();
         }
 
-        var managedProfiles = _state.Profiles.Where(profile => profile.ServerManaged).ToArray();
-        foreach (var profile in managedProfiles)
+        foreach (var profile in _state.Profiles.Where(profile => profile.ServerManaged))
         {
-            _state.Profiles.Remove(profile);
+            profile.AccountId = "";
+            profile.AccountAccessToken = "";
+            profile.AccountTokenExpiresAt = default;
         }
 
         _state.PlatformUrl = "";
@@ -802,7 +803,7 @@ public partial class MainWindow : Window
         UpdateAccountStatus();
         CloseOpenDialogs();
         ShowFirstLoginDialog();
-        AppendLog("已退出控制平台账号，已移除此前授权的节点。");
+        AppendLog("已退出控制平台账号，节点和隧道配置已保留，重新登录后可继续使用。");
     }
 
     private bool ShouldShowFirstLoginDialog()

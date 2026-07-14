@@ -42,6 +42,7 @@ public sealed class ServerState
     public Dictionary<string, long> TrafficSnapshots { get; set; } = [];
     public bool RegistrationEnabled { get; set; } = true;
     public long RegistrationQuotaBytes { get; set; } = 1024L * 1024 * 1024;
+    public int SessionHours { get; set; }
 }
 
 public sealed class UserAccount
@@ -120,6 +121,7 @@ public sealed record LoginRequest(string Username, string Password);
 public sealed record PasswordChangeRequest(string CurrentPassword, string NewPassword);
 public sealed record AccountRequest(string Username, string Password, string Role, long TrafficQuotaBytes, bool Enabled);
 public sealed record RegistrationSettingsRequest(bool Enabled, long DefaultTrafficQuotaBytes);
+public sealed record SessionSettingsRequest(int SessionHours);
 public sealed record NodeEnrollmentRequest(
     string Name, string PublicHost, string MasterUrl, string? FlagCode, string? Architecture);
 public sealed record NodeEnrollmentResponse(

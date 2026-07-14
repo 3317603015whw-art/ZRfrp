@@ -130,6 +130,10 @@
               <label class="switch-label"><input id="registration-enabled" type="checkbox"><span></span>允许注册</label></div>
             <div class="registration-controls"><label>默认额度（GB，0 为不限）<input id="registration-quota" type="number" min="0"></label><button id="save-registration-settings" type="button">保存注册设置</button><span id="registration-status"></span></div>
           </section>
+          <section class="panel registration-panel">
+            <div class="panel-head"><div><h2>Desktop 登录授权</h2><p>设置新登录会话保持有效的时间，已签发会话不受影响</p></div></div>
+            <div class="registration-controls"><label>授权时间（小时）<input id="session-hours" type="number" min="1" max="8760"></label><button id="save-session-settings" type="button">保存授权时间</button><span id="session-status"></span></div>
+          </section>
           <div class="table-wrap"><table><thead><tr><th>账号</th><th>状态</th><th>已用流量</th><th>额度</th><th>创建时间</th><th></th></tr></thead><tbody id="accounts-body"></tbody></table></div>
         </section>
       </section>

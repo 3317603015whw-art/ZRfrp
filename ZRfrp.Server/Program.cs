@@ -565,6 +565,25 @@ app.MapPut("/api/admin/registration-settings", async (
     });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 
+app.MapGet("/api/admin/session-settings", (StateStore store, ServerOptions serverOptions) => Results.Ok(new
+{
+    sessionHours = store.State.SessionHours > 0
+        ? store.State.SessionHours
+        : Math.Clamp(serverOptions.SessionHours, 1, 8760)
+})).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPut("/api/admin/session-settings", async (
+    SessionSettingsRequest request, StateStore store) =>
+{
+    if (request.SessionHours is < 1 or > 8760)
+    {
+        return Results.BadRequest(new { error = "Desktop 登录授权时间必须在 1 到 8760 小时之间。" });
+    }
+    store.State.SessionHours = request.SessionHours;
+    await store.AuditAsync("security", $"Desktop 登录授权时间调整为 {request.SessionHours} 小时");
+    return Results.Ok(new { sessionHours = store.State.SessionHours });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
 app.MapGet("/api/config/model", async (FrpsConfigService config) =>
     Results.Ok(await config.ReadModelAsync()))
     .RequireAuthorization(policy => policy.RequireRole("admin"));

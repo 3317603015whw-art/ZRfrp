@@ -84,8 +84,8 @@ public sealed class TrafficCollector : BackgroundService
                 continue;
             }
 
-            var current = ReadLong(proxy, "todayTrafficIn", "trafficIn", "traffic_in")
-                + ReadLong(proxy, "todayTrafficOut", "trafficOut", "traffic_out");
+            var current = ReadLong(proxy, "today_traffic_in", "todayTrafficIn", "trafficIn", "traffic_in")
+                + ReadLong(proxy, "today_traffic_out", "todayTrafficOut", "trafficOut", "traffic_out");
             yield return new TrafficSample(accountId, type, name, clientId, Math.Max(0, current));
         }
     }
@@ -194,9 +194,17 @@ public sealed class TrafficCollector : BackgroundService
     {
         foreach (var name in names)
         {
-            if (element.TryGetProperty(name, out var value) && value.TryGetInt64(out var result))
+            if (element.TryGetProperty(name, out var value))
             {
-                return result;
+                if (value.TryGetInt64(out var result))
+                {
+                    return result;
+                }
+                if (value.ValueKind == JsonValueKind.String
+                    && long.TryParse(value.GetString(), out result))
+                {
+                    return result;
+                }
             }
         }
         return 0;
