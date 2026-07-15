@@ -48,6 +48,21 @@ public sealed class FrpProcessRunner
         return new ProcessResult(process.ExitCode == 0, output.ToString().Trim());
     }
 
+    public async Task<ProcessResult> ReloadAsync(
+        string frpcPath, string configPath, CancellationToken cancellationToken = default)
+    {
+        using var process = CreateProcess(frpcPath, Path.GetDirectoryName(frpcPath));
+        process.StartInfo.ArgumentList.Add("reload");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add(configPath);
+        process.Start();
+        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        var output = ((await stdout) + Environment.NewLine + (await stderr)).Trim();
+        return new ProcessResult(process.ExitCode == 0, output);
+    }
+
     public void Start(string frpcPath, string configPath)
     {
         if (IsRunning)

@@ -53,6 +53,7 @@ public sealed class FrpProfile : ObservableObject
     private string _accountAccessToken = "";
     private DateTimeOffset _accountTokenExpiresAt;
     private string _managedNodeId = "";
+    private int _adminPort;
 
     public string Id
     {
@@ -158,6 +159,12 @@ public sealed class FrpProfile : ObservableObject
         set => SetField(ref _accountTokenExpiresAt, value);
     }
 
+    public int AdminPort
+    {
+        get => _adminPort;
+        set => SetField(ref _adminPort, value);
+    }
+
     [JsonIgnore]
     public bool IsLatencyTesting
     {
@@ -230,6 +237,7 @@ public sealed class FrpProfile : ObservableObject
             ManagedNodeId = ManagedNodeId,
             AccountAccessToken = AccountAccessToken,
             AccountTokenExpiresAt = AccountTokenExpiresAt,
+            AdminPort = 0,
             Proxies = new ObservableCollection<FrpProxy>(Proxies.Select(proxy => proxy.Clone()))
         };
     }

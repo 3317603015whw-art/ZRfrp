@@ -11,6 +11,11 @@ public static class FrpConfigSerializer
         builder.AppendLine($"serverAddr = {Quote(profile.ServerAddr)}");
         builder.AppendLine($"serverPort = {profile.ServerPort.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"clientID = {Quote(profile.Id)}");
+        if (profile.AdminPort > 0)
+        {
+            builder.AppendLine("webServer.addr = \"127.0.0.1\"");
+            builder.AppendLine($"webServer.port = {profile.AdminPort.ToString(CultureInfo.InvariantCulture)}");
+        }
         if (!string.IsNullOrWhiteSpace(profile.AccountId))
         {
             builder.AppendLine($"user = {Quote(profile.AccountId)}");

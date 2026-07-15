@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     private bool _isReallyExiting;
     private bool _trayDisposed;
     private bool _isLoadingAppSettings;
+    private bool _isApplyingProxyToggle;
     private DesktopUpdateInfo? _desktopUpdate;
     private Window? _floatingPanelWindow;
     private FrameworkElement? _floatingPanelContent;
@@ -513,6 +514,7 @@ public partial class MainWindow : Window
                 }
                 SaveState();
             }
+            profile.AdminPort = GetAvailableLoopbackPort();
             var configPath = _store.GetGeneratedConfigPath(profile);
             File.WriteAllText(configPath, FrpConfigSerializer.ToToml(profile), Utf8NoBom);
             NodeGeneratedConfigTextBox.Text = configPath;
@@ -1317,11 +1319,64 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ProxyEnabledChanged(object sender, RoutedEventArgs e)
+    private async void ProxyEnabledChanged(object sender, RoutedEventArgs e)
     {
+        if (_isApplyingProxyToggle)
+        {
+            return;
+        }
+        var proxy = (sender as FrameworkElement)?.DataContext as FrpProxy;
+        var previousEnabled = proxy is not null && !proxy.Enabled;
         SaveState();
         UpdateSummary();
         ProxiesList.Items.Refresh();
+        if (!_runner.IsRunning || proxy is null || _selectedProfile is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _isApplyingProxyToggle = true;
+            await ReloadSelectedProfileAsync(proxy.Enabled ? proxy : null);
+            AppendLog($"隧道“{proxy.Name}”已{(proxy.Enabled ? "热开启" : "热关闭")}，节点连接保持运行。");
+        }
+        catch (Exception exception)
+        {
+            proxy.Enabled = previousEnabled;
+            SaveState();
+            ProxiesList.Items.Refresh();
+            AppendLog($"隧道热切换失败，已恢复原状态：{exception.Message}");
+            await ShowConfirmAsync("热切换失败", exception.Message);
+        }
+        finally
+        {
+            _isApplyingProxyToggle = false;
+        }
+    }
+
+    private async Task ReloadSelectedProfileAsync(FrpProxy? newlyEnabledProxy)
+    {
+        var profile = _selectedProfile ?? throw new InvalidOperationException("当前节点不存在。");
+        if (newlyEnabledProxy is not null && profile.ServerManaged)
+        {
+            await ApplyServerAllocationAsync(profile, newlyEnabledProxy);
+        }
+        var configPath = _store.GetGeneratedConfigPath(profile);
+        File.WriteAllText(configPath, FrpConfigSerializer.ToToml(profile), Utf8NoBom);
+        var verify = await _runner.VerifyAsync(profile.FrpcPath, configPath, CancellationToken.None);
+        if (!verify.Success)
+        {
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(verify.Output)
+                ? "frpc 配置校验失败。" : verify.Output);
+        }
+        var reload = await _runner.ReloadAsync(profile.FrpcPath, configPath);
+        if (!reload.Success)
+        {
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(reload.Output)
+                ? "frpc 热重载失败。" : reload.Output);
+        }
+        SaveState();
     }
 
     private async void SaveProxyEdit_Click(object sender, RoutedEventArgs e)
@@ -2022,6 +2077,20 @@ public partial class MainWindow : Window
         }
 
         return port;
+    }
+
+    private static int GetAvailableLoopbackPort()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
     private string GetSelectedProxyType()
