@@ -26,6 +26,10 @@
       <h1>注册账号</h1>
       <p>注册后可登录并同步可用节点</p>
       <label>用户名<input id="register-username" autocomplete="username" minlength="3" maxlength="32" required></label>
+      <div id="register-email-fields" class="hidden">
+        <label>邮箱<input id="register-email" type="email" autocomplete="email"></label>
+        <div class="verification-row"><label>邮箱验证码<input id="register-code" inputmode="numeric" maxlength="6"></label><button id="send-register-code" type="button">发送验证码</button></div>
+      </div>
       <label>登录密码<input id="register-password" type="password" autocomplete="new-password" minlength="8" required></label>
       <label>确认密码<input id="register-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
       <button class="primary" type="submit">创建客户账号</button>
@@ -130,6 +134,25 @@
               <label class="switch-label"><input id="registration-enabled" type="checkbox"><span></span>允许注册</label></div>
             <div class="registration-controls"><label>默认额度（GB，0 为不限）<input id="registration-quota" type="number" min="0"></label><button id="save-registration-settings" type="button">保存注册设置</button><span id="registration-status"></span></div>
           </section>
+          <section class="settings-band">
+            <div class="panel-head"><div><h2>SMTP 邮件与注册验证</h2><p>配置验证码邮件服务；SMTP 密码留空保存时保留现有密码</p></div>
+              <label class="switch-label"><input id="email-verification-enabled" type="checkbox"><span></span>注册验证邮箱</label></div>
+            <div class="config-grid smtp-grid">
+              <label>SMTP 主机<input id="smtp-host" placeholder="smtp.example.com"></label>
+              <label>SMTP 端口<input id="smtp-port" type="number" min="1" max="65535" value="587"></label>
+              <label>SMTP 用户名<input id="smtp-username"></label>
+              <label>SMTP 密码<input id="smtp-password" type="password" placeholder="留空保留现有密码"></label>
+              <label>发件人邮箱<input id="smtp-from-email" type="email"></label>
+              <label>发件人名称<input id="smtp-from-name" value="ZRfrp"></label>
+              <label class="switch-label wide"><input id="smtp-enable-ssl" type="checkbox" checked><span></span>启用 TLS/SSL</label>
+              <label class="wide">邮件主题<input id="smtp-subject"></label>
+              <label class="wide">HTML 模板<textarea id="smtp-html-template" class="smtp-template" spellcheck="false"></textarea></label>
+            </div>
+            <div class="editor-actions"><span id="smtp-status"></span><button id="save-smtp-settings" type="button" class="primary">保存 SMTP 设置</button></div>
+            <div class="smtp-test"><input id="smtp-test-recipient" type="email" placeholder="测试收件邮箱"><button id="send-smtp-test" type="button">发送测试邮件</button></div>
+            <p class="notice">模板占位符：{{site_name}}、{{recipient_email}}、{{code}}、{{expires_minutes}}</p>
+          </section>
+          <section class="settings-band traffic-diagnostic"><div class="panel-head"><div><h2>流量采集状态</h2><p id="traffic-collector-status">等待采集器上报</p></div><button id="refresh-traffic-status" type="button">刷新状态</button></div></section>
           <section class="panel registration-panel">
             <div class="panel-head"><div><h2>Desktop 登录授权</h2><p>设置新登录会话保持有效的时间，已签发会话不受影响</p></div></div>
             <div class="registration-controls"><label>授权时间（小时）<input id="session-hours" type="number" min="1" max="8760"></label><button id="save-session-settings" type="button">保存授权时间</button><span id="session-status"></span></div>

@@ -10,6 +10,7 @@ public sealed class FrpsManager
 {
     private readonly ServerOptions _options;
     private HttpClient _http;
+    public string LastDashboardError { get; private set; } = "";
 
     public FrpsManager(ServerOptions options)
     {
@@ -66,14 +67,17 @@ public sealed class FrpsManager
             using var response = await _http.GetAsync(endpoint.TrimStart('/'), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                LastDashboardError = $"Dashboard {endpoint} 返回 HTTP {(int)response.StatusCode}";
                 return null;
             }
 
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            LastDashboardError = "";
             return document.RootElement.Clone();
         }
-        catch
+        catch (Exception exception)
         {
+            LastDashboardError = $"Dashboard {endpoint} 请求失败：{exception.Message}";
             return null;
         }
     }

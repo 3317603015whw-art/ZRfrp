@@ -32,8 +32,10 @@ builder.Services.AddSingleton<TrafficAccountingService>();
 builder.Services.AddSingleton<FrpsConfigService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<BootstrapPackageService>();
+builder.Services.AddSingleton<SmtpService>();
 builder.Services.AddHostedService<NodeHeartbeatService>();
-builder.Services.AddHostedService<TrafficCollector>();
+builder.Services.AddSingleton<TrafficCollector>();
+builder.Services.AddHostedService(service => service.GetRequiredService<TrafficCollector>());
 builder.Services.Configure<JsonOptions>(json => json.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(cookie =>
@@ -217,10 +219,29 @@ app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext context,
 app.MapGet("/api/auth/registration", (StateStore store) => Results.Ok(new
 {
     enabled = store.State.RegistrationEnabled,
-    defaultTrafficQuotaBytes = store.State.RegistrationQuotaBytes
+    defaultTrafficQuotaBytes = store.State.RegistrationQuotaBytes,
+    emailVerificationEnabled = store.State.Smtp.EmailVerificationEnabled
 }));
 
-app.MapPost("/api/auth/register", async (LoginRequest request, StateStore store) =>
+app.MapPost("/api/auth/email-code", async (EmailCodeRequest request, StateStore store, SmtpService smtp) =>
+{
+    if (!store.State.RegistrationEnabled || !store.State.Smtp.EmailVerificationEnabled)
+        return Results.Json(new { error = "当前未开启邮箱验证注册。" }, statusCode: 403);
+    try
+    {
+        var email = SmtpService.NormalizeEmail(request.Email ?? "");
+        if (store.State.Accounts.Any(item => item.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
+            return Results.BadRequest(new { error = "该邮箱已注册。" });
+        await smtp.SendVerificationCodeAsync(email);
+        return Results.Ok(new { message = "验证码已发送，15 分钟内有效。" });
+    }
+    catch (Exception exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+});
+
+app.MapPost("/api/auth/register", async (RegistrationRequest request, StateStore store, SmtpService smtp) =>
 {
     var username = request.Username?.Trim() ?? "";
     if (!store.State.RegistrationEnabled)
@@ -237,13 +258,28 @@ app.MapPost("/api/auth/register", async (LoginRequest request, StateStore store)
         return Results.BadRequest(new { error = "用户名不可用或已存在。" });
     }
 
+    var email = "";
+    if (store.State.Smtp.EmailVerificationEnabled)
+    {
+        try { email = SmtpService.NormalizeEmail(request.Email ?? ""); }
+        catch (Exception exception) { return Results.BadRequest(new { error = exception.Message }); }
+        if (store.State.Accounts.Any(item => item.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
+            return Results.BadRequest(new { error = "该邮箱已注册。" });
+        if (!smtp.VerifyCode(email, request.VerificationCode ?? ""))
+        {
+            await store.SaveAsync();
+            return Results.BadRequest(new { error = "邮箱验证码无效、已过期或尝试次数过多。" });
+        }
+    }
+
     var account = new UserAccount
     {
         Username = username,
         PasswordHash = Security.Hash(request.Password ?? ""),
         Role = "customer",
         Enabled = true,
-        TrafficQuotaBytes = Math.Max(0, store.State.RegistrationQuotaBytes)
+        TrafficQuotaBytes = Math.Max(0, store.State.RegistrationQuotaBytes),
+        Email = email
     };
     store.State.Accounts.Add(account);
     await store.AuditAsync("account", $"客户自助注册账号 {account.Username}");
@@ -562,6 +598,70 @@ app.MapPut("/api/admin/registration-settings", async (
     {
         enabled = store.State.RegistrationEnabled,
         defaultTrafficQuotaBytes = store.State.RegistrationQuotaBytes
+    });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapGet("/api/admin/smtp-settings", (StateStore store) =>
+{
+    var smtp = store.State.Smtp;
+    return Results.Ok(new
+    {
+        smtp.EmailVerificationEnabled, smtp.Host, smtp.Port, smtp.Username,
+        hasPassword = !string.IsNullOrWhiteSpace(smtp.Password),
+        smtp.FromEmail, smtp.FromName, smtp.EnableSsl,
+        smtp.SubjectTemplate, smtp.HtmlTemplate
+    });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPut("/api/admin/smtp-settings", async (SmtpSettingsRequest request, StateStore store) =>
+{
+    if (request.Port is < 1 or > 65535)
+        return Results.BadRequest(new { error = "SMTP 端口必须在 1 到 65535 之间。" });
+    var current = store.State.Smtp;
+    var smtp = new SmtpSettings
+    {
+        EmailVerificationEnabled = request.EmailVerificationEnabled,
+        Host = request.Host?.Trim() ?? "",
+        Port = request.Port,
+        Username = request.Username?.Trim() ?? "",
+        Password = string.IsNullOrWhiteSpace(request.Password) ? current.Password : request.Password,
+        FromEmail = request.FromEmail?.Trim() ?? "",
+        FromName = request.FromName?.Trim() ?? "ZRfrp",
+        EnableSsl = request.EnableSsl,
+        SubjectTemplate = string.IsNullOrWhiteSpace(request.SubjectTemplate)
+            ? "[{{site_name}}] 邮箱验证码" : request.SubjectTemplate,
+        HtmlTemplate = string.IsNullOrWhiteSpace(request.HtmlTemplate)
+            ? new SmtpSettings().HtmlTemplate : request.HtmlTemplate
+    };
+    if (smtp.EmailVerificationEnabled
+        && (string.IsNullOrWhiteSpace(smtp.Host) || string.IsNullOrWhiteSpace(smtp.FromEmail)))
+        return Results.BadRequest(new { error = "开启邮箱验证前请完整配置 SMTP 主机和发件人邮箱。" });
+    store.State.Smtp = smtp;
+    await store.AuditAsync("security", $"SMTP 设置已更新，邮箱验证{(smtp.EmailVerificationEnabled ? "已开启" : "已关闭")}");
+    return Results.Ok(new { message = "SMTP 设置已保存。" });
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapPost("/api/admin/smtp-test", async (TestEmailRequest request, SmtpService smtp) =>
+{
+    try
+    {
+        await smtp.SendTestAsync(request.RecipientEmail ?? "");
+        return Results.Ok(new { message = "测试邮件已发送。" });
+    }
+    catch (Exception exception) { return Results.BadRequest(new { error = $"发送失败：{exception.Message}" }); }
+}).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+app.MapGet("/api/admin/traffic-status", (TrafficCollector collector, FrpsManager frps) =>
+{
+    var healthy = collector.LastSuccessAt is not null && string.IsNullOrWhiteSpace(collector.LastError);
+    var message = healthy
+        ? $"最近成功：{collector.LastSuccessAt:yyyy-MM-dd HH:mm:ss} UTC；Dashboard 通道 {collector.LastDashboardProxyCount}，匹配账号样本 {collector.LastMatchedSampleCount}，本轮新增 {collector.LastAppliedBytes} B。"
+        : $"采集异常：{collector.LastError} {frps.LastDashboardError}".Trim();
+    return Results.Ok(new
+    {
+        healthy, message, collector.LastAttemptAt, collector.LastSuccessAt,
+        collector.LastDashboardProxyCount, collector.LastMatchedSampleCount,
+        collector.LastAppliedBytes, collector.LastError, frps.LastDashboardError
     });
 }).RequireAuthorization(policy => policy.RequireRole("admin"));
 

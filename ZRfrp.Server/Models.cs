@@ -40,6 +40,8 @@ public sealed class ServerState
     public List<string> RevokedNodeIds { get; set; } = [];
     public List<ManagedClient> Clients { get; set; } = [];
     public Dictionary<string, long> TrafficSnapshots { get; set; } = [];
+    public SmtpSettings Smtp { get; set; } = new();
+    public List<EmailVerificationChallenge> EmailVerificationChallenges { get; set; } = [];
     public bool RegistrationEnabled { get; set; } = true;
     public long RegistrationQuotaBytes { get; set; } = 1024L * 1024 * 1024;
     public int SessionHours { get; set; }
@@ -55,6 +57,30 @@ public sealed class UserAccount
     public long TrafficQuotaBytes { get; set; }
     public long TrafficUsedBytes { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string Email { get; set; } = "";
+}
+
+public sealed class SmtpSettings
+{
+    public bool EmailVerificationEnabled { get; set; }
+    public string Host { get; set; } = "";
+    public int Port { get; set; } = 587;
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
+    public string FromEmail { get; set; } = "";
+    public string FromName { get; set; } = "ZRfrp";
+    public bool EnableSsl { get; set; } = true;
+    public string SubjectTemplate { get; set; } = "[{{site_name}}] 邮箱验证码";
+    public string HtmlTemplate { get; set; } = "<h2>{{site_name}} 邮箱验证码</h2><p>您的验证码是：</p><h1>{{code}}</h1><p>验证码将在 {{expires_minutes}} 分钟后失效。</p>";
+}
+
+public sealed class EmailVerificationChallenge
+{
+    public string Email { get; set; } = "";
+    public string CodeHash { get; set; } = "";
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset LastSentAt { get; set; }
+    public int FailedAttempts { get; set; }
 }
 
 public sealed class AccountSession
@@ -118,6 +144,12 @@ public sealed class PortAllocation
 
 public sealed record AuditEntry(DateTimeOffset Time, string Action, string Detail);
 public sealed record LoginRequest(string Username, string Password);
+public sealed record RegistrationRequest(string Username, string Password, string Email, string VerificationCode);
+public sealed record EmailCodeRequest(string Email);
+public sealed record SmtpSettingsRequest(
+    bool EmailVerificationEnabled, string Host, int Port, string Username, string Password,
+    string FromEmail, string FromName, bool EnableSsl, string SubjectTemplate, string HtmlTemplate);
+public sealed record TestEmailRequest(string RecipientEmail);
 public sealed record PasswordChangeRequest(string CurrentPassword, string NewPassword);
 public sealed record AccountRequest(string Username, string Password, string Role, long TrafficQuotaBytes, bool Enabled);
 public sealed record RegistrationSettingsRequest(bool Enabled, long DefaultTrafficQuotaBytes);

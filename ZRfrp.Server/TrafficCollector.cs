@@ -13,6 +13,12 @@ public sealed class TrafficCollector : BackgroundService
     private readonly TrafficAccountingService _accounting;
     private readonly ILogger<TrafficCollector> _logger;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    public DateTimeOffset? LastAttemptAt { get; private set; }
+    public DateTimeOffset? LastSuccessAt { get; private set; }
+    public int LastDashboardProxyCount { get; private set; }
+    public int LastMatchedSampleCount { get; private set; }
+    public long LastAppliedBytes { get; private set; }
+    public string LastError { get; private set; } = "尚未执行流量采集。";
 
     public TrafficCollector(
         FrpsManager frps,
@@ -34,24 +40,36 @@ public sealed class TrafficCollector : BackgroundService
         {
             try
             {
+                LastAttemptAt = DateTimeOffset.UtcNow;
                 var samples = new List<TrafficSample>();
+                var dashboardProxyCount = 0;
                 foreach (var type in ProxyTypes)
                 {
                     var json = await _frps.GetDashboardJsonAsync($"/api/proxy/{type}", stoppingToken);
                     if (json is not null)
                     {
-                        samples.AddRange(Collect(type, json.Value));
+                        var proxies = EnumerateProxies(json.Value).ToArray();
+                        dashboardProxyCount += proxies.Length;
+                        samples.AddRange(Collect(type, proxies));
                     }
                 }
+
+                LastDashboardProxyCount = dashboardProxyCount;
+                LastMatchedSampleCount = samples.Count;
+                if (dashboardProxyCount == 0 && !string.IsNullOrWhiteSpace(_frps.LastDashboardError))
+                    throw new InvalidOperationException(_frps.LastDashboardError);
 
                 if (_options.Mode.Equals("node", StringComparison.OrdinalIgnoreCase))
                 {
                     await ReportToMasterAsync(samples, stoppingToken);
+                    LastAppliedBytes = 0;
                 }
                 else
                 {
-                    await _accounting.ApplyAsync(LocalNodeId(), samples, stoppingToken);
+                    LastAppliedBytes = await _accounting.ApplyAsync(LocalNodeId(), samples, stoppingToken);
                 }
+                LastSuccessAt = DateTimeOffset.UtcNow;
+                LastError = "";
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -59,6 +77,7 @@ public sealed class TrafficCollector : BackgroundService
             }
             catch (Exception exception)
             {
+                LastError = exception.Message;
                 _logger.LogWarning(exception, "采集 frps 流量失败，将在下一周期重试。");
             }
 
@@ -66,9 +85,9 @@ public sealed class TrafficCollector : BackgroundService
         }
     }
 
-    private IEnumerable<TrafficSample> Collect(string type, JsonElement element)
+    private IEnumerable<TrafficSample> Collect(string type, IEnumerable<JsonElement> proxies)
     {
-        foreach (var proxy in EnumerateProxies(element))
+        foreach (var proxy in proxies)
         {
             var name = ReadString(proxy, "name", "proxy_name");
             if (string.IsNullOrWhiteSpace(name))
@@ -113,6 +132,12 @@ public sealed class TrafficCollector : BackgroundService
         {
             return allocation.AccountId;
         }
+
+        allocation = _store.State.Allocations.FirstOrDefault(item => item.Active
+            && !string.IsNullOrWhiteSpace(clientId)
+            && item.ClientId.Equals(clientId, StringComparison.Ordinal));
+        if (allocation is not null && !string.IsNullOrWhiteSpace(allocation.AccountId))
+            return allocation.AccountId;
 
         return _store.State.Accounts
             .Where(item => item.Role == "customer")
