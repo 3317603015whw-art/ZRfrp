@@ -65,6 +65,14 @@ public sealed class TrafficAccountingService
                     applied += increment;
                 }
                 _store.State.TrafficSnapshots[key] = sample.TotalBytes;
+                var trafficInIncrement = ApplyDirectionalSnapshot(
+                    _store.State.TrafficInSnapshots, key, sample.TrafficInBytes);
+                var trafficOutIncrement = ApplyDirectionalSnapshot(
+                    _store.State.TrafficOutSnapshots, key, sample.TrafficOutBytes);
+                _store.State.TotalTrafficInBytes = SaturatingAdd(
+                    _store.State.TotalTrafficInBytes, trafficInIncrement);
+                _store.State.TotalTrafficOutBytes = SaturatingAdd(
+                    _store.State.TotalTrafficOutBytes, trafficOutIncrement);
             }
 
             await _store.SaveAsync();
@@ -82,4 +90,21 @@ public sealed class TrafficAccountingService
 
     private static string SnapshotKey(string nodeId, TrafficSample sample) =>
         $"traffic-v2:{nodeId}:{sample.AccountId}:{sample.ProxyType}:{sample.ClientId}:{sample.ProxyName}";
+
+    private static long ApplyDirectionalSnapshot(
+        IDictionary<string, long> snapshots, string key, long current)
+    {
+        current = Math.Max(0, current);
+        if (!snapshots.TryGetValue(key, out var previous))
+        {
+            snapshots[key] = current;
+            return current;
+        }
+        var increment = current >= previous ? current - previous : current;
+        snapshots[key] = current;
+        return increment;
+    }
+
+    private static long SaturatingAdd(long left, long right) =>
+        right > 0 && left > long.MaxValue - right ? long.MaxValue : left + right;
 }

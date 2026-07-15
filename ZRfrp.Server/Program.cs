@@ -327,6 +327,8 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, ServerOpt
     object clients = DashboardHasItems(clientsTask.Result)
         ? clientsTask.Result!.Value
         : trackedClients;
+    var proxyTraffic = SumProxyTraffic(
+        tcpTask.Result, udpTask.Result, httpTask.Result, httpsTask.Result);
     return Results.Ok(new
     {
         reachable = healthTask.Result,
@@ -335,6 +337,18 @@ app.MapGet("/api/overview", async (FrpsManager frps, StateStore store, ServerOpt
         clients,
         trackedClients,
         proxies = new { tcp = tcpTask.Result, udp = udpTask.Result, http = httpTask.Result, https = httpsTask.Result },
+        proxyTraffic = new
+        {
+            totalTrafficIn = proxyTraffic.In,
+            totalTrafficOut = proxyTraffic.Out,
+            source = "frps-proxy-today"
+        },
+        accountedTraffic = new
+        {
+            totalTrafficIn = store.State.TotalTrafficInBytes,
+            totalTrafficOut = store.State.TotalTrafficOutBytes,
+            source = "zrfrp-all-nodes-persistent"
+        },
         publicHost = PublicFrpsHost(serverOptions),
         bindPort = serverOptions.FrpsBindPort,
         localNodeName = LocalNodeName(store, serverOptions),
@@ -559,6 +573,8 @@ app.MapDelete("/api/admin/accounts/{id}", async (string id, StateStore store) =>
                  .ToArray())
     {
         store.State.TrafficSnapshots.Remove(key);
+        store.State.TrafficInSnapshots.Remove(key);
+        store.State.TrafficOutSnapshots.Remove(key);
     }
     await store.AuditAsync("account", $"删除客户账号 {account.Username}");
     return Results.Ok(new { message = $"客户账号 {account.Username} 已删除。" });
@@ -1506,6 +1522,41 @@ static NodeExportDocument CreateNodeExport(StateStore store, ServerOptions optio
 
     return new NodeExportDocument("zrfrp-node-export", 1, platformUrl, DateTimeOffset.UtcNow, nodes);
 }
+
+static (long In, long Out) SumProxyTraffic(params JsonElement?[] documents)
+{
+    long trafficIn = 0;
+    long trafficOut = 0;
+    foreach (var document in documents)
+    {
+        if (document is null) continue;
+        var root = document.Value;
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("proxies", out var proxies)
+            || proxies.ValueKind != JsonValueKind.Array) continue;
+        foreach (var proxy in proxies.EnumerateArray())
+        {
+            trafficIn = SaturatingAdd(trafficIn, ReadTrafficValue(proxy, "todayTrafficIn", "today_traffic_in"));
+            trafficOut = SaturatingAdd(trafficOut, ReadTrafficValue(proxy, "todayTrafficOut", "today_traffic_out"));
+        }
+    }
+    return (trafficIn, trafficOut);
+}
+
+static long ReadTrafficValue(JsonElement element, params string[] names)
+{
+    foreach (var name in names)
+    {
+        if (!element.TryGetProperty(name, out var value)) continue;
+        if (value.TryGetInt64(out var number)) return Math.Max(0, number);
+        if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out number))
+            return Math.Max(0, number);
+    }
+    return 0;
+}
+
+static long SaturatingAdd(long left, long right) =>
+    right > 0 && left > long.MaxValue - right ? long.MaxValue : left + right;
 
 static async Task<List<PortAllocation>> GetManagedAllocationsAsync(
     StateStore store, ServerOptions options, CancellationToken cancellationToken)

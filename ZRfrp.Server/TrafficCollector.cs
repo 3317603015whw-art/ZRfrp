@@ -103,9 +103,12 @@ public sealed class TrafficCollector : BackgroundService
                 continue;
             }
 
-            var current = ReadLong(proxy, "today_traffic_in", "todayTrafficIn", "trafficIn", "traffic_in")
-                + ReadLong(proxy, "today_traffic_out", "todayTrafficOut", "trafficOut", "traffic_out");
-            yield return new TrafficSample(accountId, type, name, clientId, Math.Max(0, current));
+            var trafficIn = ReadLong(proxy, "today_traffic_in", "todayTrafficIn", "trafficIn", "traffic_in");
+            var trafficOut = ReadLong(proxy, "today_traffic_out", "todayTrafficOut", "trafficOut", "traffic_out");
+            var current = SaturatingAdd(trafficIn, trafficOut);
+            yield return new TrafficSample(
+                accountId, type, name, clientId, Math.Max(0, current),
+                Math.Max(0, trafficIn), Math.Max(0, trafficOut));
         }
     }
 
@@ -234,4 +237,7 @@ public sealed class TrafficCollector : BackgroundService
         }
         return 0;
     }
+
+    private static long SaturatingAdd(long left, long right) =>
+        right > 0 && left > long.MaxValue - right ? long.MaxValue : left + right;
 }

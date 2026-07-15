@@ -40,6 +40,10 @@ public sealed class ServerState
     public List<string> RevokedNodeIds { get; set; } = [];
     public List<ManagedClient> Clients { get; set; } = [];
     public Dictionary<string, long> TrafficSnapshots { get; set; } = [];
+    public Dictionary<string, long> TrafficInSnapshots { get; set; } = [];
+    public Dictionary<string, long> TrafficOutSnapshots { get; set; } = [];
+    public long TotalTrafficInBytes { get; set; }
+    public long TotalTrafficOutBytes { get; set; }
     public SmtpSettings Smtp { get; set; } = new();
     public List<EmailVerificationChallenge> EmailVerificationChallenges { get; set; } = [];
     public bool RegistrationEnabled { get; set; } = true;
@@ -209,7 +213,8 @@ public sealed record PeerAccountValidationRequest(string AccessToken);
 public sealed record PeerAccountValidationResponse(
     string Id, string Username, long TrafficQuotaBytes, long TrafficUsedBytes);
 public sealed record TrafficSample(
-    string AccountId, string ProxyType, string ProxyName, string ClientId, long TotalBytes);
+    string AccountId, string ProxyType, string ProxyName, string ClientId, long TotalBytes,
+    long TrafficInBytes = 0, long TrafficOutBytes = 0);
 public sealed record PeerTrafficReport(string NodeId, IReadOnlyList<TrafficSample> Samples);
 public sealed record ConfigUpdateRequest(string Content, bool Restart);
 public sealed record FrpsInstallStatus(
