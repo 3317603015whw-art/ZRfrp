@@ -77,14 +77,15 @@ public sealed class SmtpSettings
     public int VerificationMinutes { get; set; } = 15;
     public string SubjectTemplate { get; set; } = "[{{site_name}}] 邮箱验证码";
     public string HtmlTemplate { get; set; } = """
-<!doctype html><html><body style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,'Microsoft YaHei',sans-serif;color:#111827">
-<div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.10)">
-<div style="padding:28px 40px;background:#4f46e5;color:#ffffff"><h1 style="margin:0;font-size:26px">邮箱验证码</h1></div>
-<div style="padding:42px 40px;font-size:16px;line-height:1.8"><p>{{recipient_name}}，您好：</p><p>您的验证码是：</p>
+<!doctype html><html><body style="margin:0;padding:24px;background:#f4f4f5;font-family:Arial,'Microsoft YaHei',sans-serif;color:#18181b">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.10)">
+<tr><td style="padding:28px 40px;background:#4f46e5;color:#ffffff"><h1 style="margin:0;font-size:26px;line-height:1.3">邮箱验证码</h1></td></tr>
+<tr><td style="padding:42px 40px;font-size:16px;line-height:1.8"><p style="margin:0 0 18px">{{recipient_name}}，您好：</p><p style="margin:0 0 18px">您的验证码是：</p>
 <div style="margin:30px 0;text-align:center;font-size:38px;font-weight:700;letter-spacing:10px;color:#111827">{{code}}</div>
-<p>验证码将在 <strong>{{expires_minutes}} 分钟</strong>后失效。</p><p>如果不是您本人操作，请忽略此邮件。</p></div>
-<div style="padding:20px 40px;background:#fafafa;color:#94a3b8;font-size:13px">此邮件由 {{site_name}} 自动发送，请勿直接回复。</div>
-</div></body></html>
+<p style="margin:0 0 18px">验证码将在 <strong>{{expires_minutes}} 分钟</strong>后失效。</p><p style="margin:0">如果不是您本人操作，请忽略此邮件。</p></td></tr>
+<tr><td style="padding:20px 40px;background:#fafafa;color:#94a3b8;font-size:13px">This email was sent by {{site_name}}. Please do not reply directly.</td></tr>
+</table></td></tr></table></body></html>
 """;
 }
 

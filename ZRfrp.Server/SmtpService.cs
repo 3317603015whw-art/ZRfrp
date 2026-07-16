@@ -109,6 +109,10 @@ public sealed class SmtpService
         .Replace("{{recipient_email}}", HtmlEncoder.Default.Encode(email), StringComparison.Ordinal)
         .Replace("{{recipient_name}}", HtmlEncoder.Default.Encode(
             string.IsNullOrWhiteSpace(recipientName) ? email : recipientName.Trim()), StringComparison.Ordinal)
+        .Replace("{{user_name}}", HtmlEncoder.Default.Encode(
+            string.IsNullOrWhiteSpace(recipientName) ? email : recipientName.Trim()), StringComparison.Ordinal)
         .Replace("{{code}}", HtmlEncoder.Default.Encode(code), StringComparison.Ordinal)
-        .Replace("{{expires_minutes}}", verificationMinutes.ToString(), StringComparison.Ordinal);
+        .Replace("{{verification_code}}", HtmlEncoder.Default.Encode(code), StringComparison.Ordinal)
+        .Replace("{{expires_minutes}}", verificationMinutes.ToString(), StringComparison.Ordinal)
+        .Replace("{{expires_in_minutes}}", verificationMinutes.ToString(), StringComparison.Ordinal);
 }

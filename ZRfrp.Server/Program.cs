@@ -1669,7 +1669,9 @@ static async Task InitializeSecretsAsync(StateStore store, ILogger logger)
     var changed = false;
     const string legacyEmailTemplate = "<h2>{{site_name}} 邮箱验证码</h2><p>您的验证码是：</p><h1>{{code}}</h1><p>验证码将在 {{expires_minutes}} 分钟后失效。</p>";
     if (string.IsNullOrWhiteSpace(store.State.Smtp.HtmlTemplate)
-        || store.State.Smtp.HtmlTemplate.Equals(legacyEmailTemplate, StringComparison.Ordinal))
+        || store.State.Smtp.HtmlTemplate.Equals(legacyEmailTemplate, StringComparison.Ordinal)
+        || store.State.Smtp.HtmlTemplate.Contains("{{verification_code}}", StringComparison.Ordinal)
+        || store.State.Smtp.HtmlTemplate.Contains("{{expires_in_minutes}}", StringComparison.Ordinal))
     {
         store.State.Smtp.HtmlTemplate = new SmtpSettings().HtmlTemplate;
         changed = true;
