@@ -950,6 +950,7 @@ public partial class MainWindow : Window
                 0,
                 0);
             ImportNodeDocument(document, session);
+            ApplyAccountSession(session, platformUrl);
             SaveState();
             AppendLog("已从控制平台刷新节点地址与认证信息。");
         }

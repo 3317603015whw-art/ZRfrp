@@ -116,10 +116,28 @@ public sealed class TrafficCollector : BackgroundService
     {
         if (!string.IsNullOrWhiteSpace(user))
         {
-            if (_store.State.Accounts.Any(item => item.Role == "customer" && item.Id == user)
-                || _store.State.Allocations.Any(item => item.Active && item.AccountId == user))
+            var account = _store.State.Accounts.FirstOrDefault(item =>
+                item.Role == "customer"
+                && (item.Id.Equals(user, StringComparison.Ordinal)
+                    || item.Username.Equals(user, StringComparison.OrdinalIgnoreCase)));
+            if (account is not null)
+            {
+                return account.Id;
+            }
+            if (_store.State.Allocations.Any(item => item.Active && item.AccountId == user))
             {
                 return user;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(clientId))
+        {
+            var trackedClient = _store.State.Clients.FirstOrDefault(item =>
+                item.ClientId.Equals(clientId, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(item.AccountId));
+            if (trackedClient is not null)
+            {
+                return trackedClient.AccountId;
             }
         }
 
