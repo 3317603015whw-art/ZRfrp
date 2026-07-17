@@ -2,6 +2,7 @@ namespace ZRfrp.Server;
 
 public sealed class TrafficAccountingService
 {
+    public const string UnattributedAccountId = "__unattributed__";
     private static readonly TimeSpan HistoryBucketSize = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan HistoryRetention = TimeSpan.FromDays(31);
     private readonly StateStore _store;
@@ -35,33 +36,52 @@ public sealed class TrafficAccountingService
                 }
 
                 var account = _store.State.Accounts.FirstOrDefault(item =>
-                    item.Role == "customer" && item.Id == sample.AccountId);
-                if (account is null)
+                    item.Id == sample.AccountId);
+                var effectiveSample = sample;
+                if (account is null && sample.AccountId != UnattributedAccountId)
                 {
-                    continue;
+                    effectiveSample = sample with { AccountId = UnattributedAccountId };
                 }
 
-                var key = SnapshotKey(nodeId, sample);
+                var key = SnapshotKey(nodeId, effectiveSample);
+                var historyInitialized = _store.State.TrafficHistoryInitializedKeys.Contains(key)
+                    || HasHistoryForSample(nodeId, effectiveSample);
                 var increment = ApplySnapshot(
-                    _store.State.TrafficSnapshots, key, sample.TotalBytes);
+                    _store.State.TrafficSnapshots, key, effectiveSample.TotalBytes);
                 var trafficInIncrement = ApplySnapshot(
-                    _store.State.TrafficInSnapshots, key, sample.TrafficInBytes);
+                    _store.State.TrafficInSnapshots, key, effectiveSample.TrafficInBytes);
                 var trafficOutIncrement = ApplySnapshot(
-                    _store.State.TrafficOutSnapshots, key, sample.TrafficOutBytes);
+                    _store.State.TrafficOutSnapshots, key, effectiveSample.TrafficOutBytes);
                 (trafficInIncrement, trafficOutIncrement) = NormalizeDirectionalIncrements(
                     increment, trafficInIncrement, trafficOutIncrement);
+                var historyIn = trafficInIncrement;
+                var historyOut = trafficOutIncrement;
+                if (!historyInitialized && effectiveSample.TotalBytes > 0)
+                {
+                    (historyIn, historyOut) = NormalizeDirectionalIncrements(
+                        effectiveSample.TotalBytes,
+                        effectiveSample.TrafficInBytes,
+                        effectiveSample.TrafficOutBytes);
+                }
+                _store.State.TrafficHistoryInitializedKeys.Add(key);
                 stateChanged = true;
 
                 if (increment > 0)
                 {
-                    account.TrafficUsedBytes = SaturatingAdd(account.TrafficUsedBytes, increment);
+                    if (account is not null)
+                    {
+                        account.TrafficUsedBytes = SaturatingAdd(account.TrafficUsedBytes, increment);
+                    }
                     applied = SaturatingAdd(applied, increment);
                     _store.State.TotalTrafficInBytes = SaturatingAdd(
                         _store.State.TotalTrafficInBytes, trafficInIncrement);
                     _store.State.TotalTrafficOutBytes = SaturatingAdd(
                         _store.State.TotalTrafficOutBytes, trafficOutIncrement);
+                }
+                if (historyIn > 0 || historyOut > 0)
+                {
                     RecordHistory(
-                        nodeId, sample, trafficInIncrement, trafficOutIncrement, DateTimeOffset.UtcNow);
+                        nodeId, effectiveSample, historyIn, historyOut, DateTimeOffset.UtcNow);
                 }
             }
 
@@ -103,6 +123,11 @@ public sealed class TrafficAccountingService
                 _store.State.TrafficInSnapshots[key] = long.MaxValue;
                 _store.State.TrafficOutSnapshots[key] = long.MaxValue;
             }
+            foreach (var bucket in _store.State.TrafficHistory)
+            {
+                bucket.Slices.RemoveAll(slice => slice.AccountId == accountId);
+            }
+            _store.State.TrafficHistory.RemoveAll(bucket => bucket.Slices.Count == 0);
             await _store.SaveAsync();
             return true;
         }
@@ -125,6 +150,7 @@ public sealed class TrafficAccountingService
                 _store.State.TrafficSnapshots.Remove(key);
                 _store.State.TrafficInSnapshots.Remove(key);
                 _store.State.TrafficOutSnapshots.Remove(key);
+                _store.State.TrafficHistoryInitializedKeys.Remove(key);
             }
             foreach (var bucket in _store.State.TrafficHistory)
             {
@@ -274,6 +300,17 @@ public sealed class TrafficAccountingService
         return (scaledIn, total - scaledIn);
     }
 
+    private bool HasHistoryForSample(string nodeId, TrafficSample sample)
+    {
+        var normalizedNodeId = string.IsNullOrWhiteSpace(nodeId) ? "local" : nodeId;
+        var proxyName = FriendlyProxyName(sample.AccountId, sample.ProxyName);
+        return _store.State.TrafficHistory.Any(bucket => bucket.Slices.Any(slice =>
+            slice.AccountId == sample.AccountId
+            && slice.NodeId == normalizedNodeId
+            && slice.ProxyType.Equals(sample.ProxyType, StringComparison.OrdinalIgnoreCase)
+            && slice.ProxyName == proxyName));
+    }
+
     private void RecordHistory(
         string nodeId,
         TrafficSample sample,
@@ -395,8 +432,22 @@ public sealed class TrafficAccountingService
         return _store.State.Nodes.FirstOrDefault(item => item.Id == nodeId)?.Name ?? nodeId;
     }
 
-    private string AccountLabel(string accountId) =>
-        _store.State.Accounts.FirstOrDefault(item => item.Id == accountId)?.Username ?? "已删除账号";
+    private string AccountLabel(string accountId)
+    {
+        if (accountId == UnattributedAccountId)
+        {
+            return "未归属流量";
+        }
+        var account = _store.State.Accounts.FirstOrDefault(item => item.Id == accountId);
+        if (account is null)
+        {
+            return "已删除账号";
+        }
+        var type = account.Role.Equals("admin", StringComparison.OrdinalIgnoreCase)
+            ? "管理员"
+            : "客户";
+        return $"{account.Username} · {type}";
+    }
 
     private string TunnelLabel(string key)
     {

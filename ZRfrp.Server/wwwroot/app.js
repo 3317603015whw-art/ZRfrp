@@ -2,9 +2,10 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let snapshot=null, session=null, advanced=false;
 let registrationSettings={emailVerificationEnabled:false};
 const trafficRequestIds={admin:0,customer:0};
+const trafficData={admin:null,customer:null};
 const titles={
   overview:["主控总览","连接、流量和服务状态"],nodes:["服务节点","安装、监控和控制 frps 节点"],
-  accounts:["客户账号","账号状态与流量额度"],clients:["客户端","在线设备与连接信息"],
+  accounts:["用户账号","管理员与客户账号的流量和额度"],clients:["客户端","在线设备与连接信息"],
   tunnels:["隧道分配","服务端端口租约与限速"],config:["服务配置","模块化配置与高级文本编辑"],
   security:["安全","面板访问凭据"],maintenance:["系统维护","FRP 环境检测、安装与版本更新"],customer:["仪表盘","流量额度与账号状态"]
 };
@@ -17,7 +18,7 @@ async function api(path,options={}){
 function showLogin(){$("#app").classList.add("hidden");$("#register-form").classList.add("hidden");$("#login-form").classList.remove("hidden");$("#login").classList.remove("hidden")}
 function showRegister(){$("#login-form").classList.add("hidden");$("#register-form").classList.remove("hidden");$("#login").classList.remove("hidden")}
 function showApp(role){$("#login").classList.add("hidden");$("#app").classList.remove("hidden");$$(".admin-only").forEach(x=>x.classList.toggle("hidden",role!=="admin"));$$(".customer-only").forEach(x=>x.classList.toggle("hidden",role!=="customer"));openPage(role==="admin"?"overview":"customer")}
-function openPage(page){$$(".nav,.page").forEach(x=>x.classList.remove("active"));const nav=$(`.nav[data-page="${page}"]`);if(nav)nav.classList.add("active");$("#page-"+page).classList.add("active");[$("#page-title").textContent,$("#page-subtitle").textContent]=titles[page];if(page==="config")loadConfigModel();if(page==="accounts")loadAccounts();if(page==="customer")loadCustomer();if(page==="nodes")loadNodes();if(page==="maintenance")loadMaintenance()}
+function openPage(page){$$(".nav,.page").forEach(x=>x.classList.remove("active"));const nav=$(`.nav[data-page="${page}"]`);if(nav)nav.classList.add("active");$("#page-"+page).classList.add("active");[$("#page-title").textContent,$("#page-subtitle").textContent]=titles[page];if(page==="config")loadConfigModel();if(page==="accounts")loadAccounts();if(page==="customer")loadCustomer();if(page==="overview")renderTrafficDashboard("admin");if(page==="nodes")loadNodes();if(page==="maintenance")loadMaintenance()}
 function toast(message){const box=$("#toast");box.textContent=message;box.classList.add("show");setTimeout(()=>box.classList.remove("show"),2400)}
 async function copyText(text,source=null){
   if(window.isSecureContext&&navigator.clipboard?.writeText){
@@ -59,7 +60,25 @@ function renderOverview(data){
   $("#allocations-body").innerHTML=(data.allocations||[]).map(x=>`<tr><td><strong>${escapeHtml(x.proxyName)}</strong></td><td>${escapeHtml(x.nodeName||x.nodeId||"本机节点")}</td><td>${escapeHtml(x.clientId)}</td><td>${escapeHtml(x.proxyType.toUpperCase())}</td><td>${x.remotePort}</td><td>${escapeHtml(x.bandwidthLimit||"不限速")}</td><td><span class="tag">已锁定</span></td><td><button class="danger release" data-id="${x.id}" data-node-id="${escapeHtml(x.nodeId||"local")}">释放</button></td></tr>`).join("")||emptyRow(8,"暂无端口租约");
   $$(".release").forEach(button=>button.onclick=async()=>{try{await api(`/api/allocations/${button.dataset.id}?nodeId=${encodeURIComponent(button.dataset.nodeId)}`,{method:"DELETE"});toast("租约已释放");refresh()}catch(e){toast(e.message)}});
 }
-async function loadAccounts(){try{const rows=await api("/api/admin/accounts");$("#accounts-body").innerHTML=rows.filter(x=>x.role==="customer").map(x=>`<tr><td><strong>${escapeHtml(x.username)}</strong></td><td><span class="tag ${x.enabled?"":"off"}">${x.enabled?"启用":"停用"}</span></td><td>${fmtBytes(x.trafficUsedBytes)}</td><td><input class="quota-edit" data-id="${x.id}" data-enabled="${x.enabled}" type="number" min="0" value="${x.trafficQuotaBytes?Math.round(x.trafficQuotaBytes/1024**3):0}" title="GB，0 为不限"></td><td>${new Date(x.createdAt).toLocaleDateString()}</td><td class="account-actions"><button class="quota-save" data-id="${x.id}">保存额度</button> <button class="traffic-reset" data-id="${x.id}">清零</button> <button class="account-toggle" data-id="${x.id}" data-enabled="${x.enabled}" data-quota="${x.trafficQuotaBytes}">${x.enabled?"停用":"启用"}</button> <button class="danger account-delete" data-id="${x.id}" data-username="${escapeHtml(x.username)}">删除</button></td></tr>`).join("")||emptyRow(6,"暂无客户账号");$$(".account-toggle").forEach(b=>b.onclick=()=>toggleAccount(b));$$(".quota-save").forEach(b=>b.onclick=()=>saveQuota(b));$$(".traffic-reset").forEach(b=>b.onclick=async()=>{try{await api(`/api/admin/accounts/${b.dataset.id}/reset-traffic`,{method:"POST"});toast("流量已清零");loadAccounts()}catch(e){toast(e.message)}});$$(".account-delete").forEach(b=>b.onclick=()=>deleteAccount(b))}catch(e){toast(e.message)}}
+async function loadAccounts(){
+  try{
+    const rows=await api("/api/admin/accounts");
+    $("#accounts-body").innerHTML=rows.map(x=>{
+      const isAdmin=x.role==="admin",roleName=isAdmin?"管理员":"客户";
+      const quota=isAdmin
+        ?`<span class="quota-readonly">${x.trafficQuotaBytes?fmtBytes(x.trafficQuotaBytes):"不限"}</span>`
+        :`<input class="quota-edit" data-id="${x.id}" data-enabled="${x.enabled}" type="number" min="0" value="${x.trafficQuotaBytes?Math.round(x.trafficQuotaBytes/1024**3):0}" title="GB，0 为不限">`;
+      const actions=isAdmin
+        ?`<button class="traffic-reset" data-id="${x.id}">清零</button>`
+        :`<button class="quota-save" data-id="${x.id}">保存额度</button> <button class="traffic-reset" data-id="${x.id}">清零</button> <button class="account-toggle" data-id="${x.id}" data-enabled="${x.enabled}" data-quota="${x.trafficQuotaBytes}">${x.enabled?"停用":"启用"}</button> <button class="danger account-delete" data-id="${x.id}" data-username="${escapeHtml(x.username)}">删除</button>`;
+      return`<tr><td><strong>${escapeHtml(x.username)}</strong></td><td><span class="tag ${isAdmin?"admin":""}">${roleName}</span></td><td><span class="tag ${x.enabled?"":"off"}">${x.enabled?"启用":"停用"}</span></td><td>${fmtBytes(x.trafficUsedBytes)}</td><td>${quota}</td><td>${new Date(x.createdAt).toLocaleDateString()}</td><td class="account-actions">${actions}</td></tr>`;
+    }).join("")||emptyRow(7,"暂无用户账号");
+    $$(".account-toggle").forEach(b=>b.onclick=()=>toggleAccount(b));
+    $$(".quota-save").forEach(b=>b.onclick=()=>saveQuota(b));
+    $$(".traffic-reset").forEach(b=>b.onclick=async()=>{try{await api(`/api/admin/accounts/${b.dataset.id}/reset-traffic`,{method:"POST"});toast("流量已清零");loadAccounts()}catch(e){toast(e.message)}});
+    $$(".account-delete").forEach(b=>b.onclick=()=>deleteAccount(b));
+  }catch(e){toast(e.message)}
+}
 async function saveQuota(button){const input=$(`.quota-edit[data-id="${button.dataset.id}"]`);try{await api(`/api/admin/accounts/${button.dataset.id}`,{method:"PUT",body:JSON.stringify({username:"",password:"",role:"customer",trafficQuotaBytes:Number(input.value||0)*1024**3,enabled:input.dataset.enabled==="true"})});toast("流量额度已更新");loadAccounts()}catch(e){toast(e.message)}}
 async function toggleAccount(button){try{await api(`/api/admin/accounts/${button.dataset.id}`,{method:"PUT",body:JSON.stringify({username:"",password:"",role:"customer",trafficQuotaBytes:Number(button.dataset.quota),enabled:button.dataset.enabled!=="true"})});loadAccounts()}catch(e){toast(e.message)}}
 async function deleteAccount(button){const accepted=await askConfirmation("删除客户账号",`确定删除“${button.dataset.username}”吗？该账号的登录会话、客户端授权和端口租约将同时失效。`);if(!accepted)return;try{const result=await api(`/api/admin/accounts/${button.dataset.id}`,{method:"DELETE"});toast(result.message);loadAccounts()}catch(e){toast(e.message)}}
@@ -68,7 +87,13 @@ async function loadCustomer(){try{const me=await api("/api/customer/me");$("#cus
 async function loadTrafficDashboard(scope){
   const root=document.querySelector(`[data-traffic-dashboard="${scope}"]`);if(!root)return;
   const requestId=++trafficRequestIds[scope],range=root.dataset.range||"24h",status=root.querySelector('[data-stat="status"]');
-  try{const data=await api(`/api/traffic/statistics?range=${encodeURIComponent(range)}`);if(requestId!==trafficRequestIds[scope])return;window.ZRfrpTrafficCharts?.render(root,data)}catch(error){if(requestId!==trafficRequestIds[scope])return;status.textContent=error.message}
+  try{const data=await api(`/api/traffic/statistics?range=${encodeURIComponent(range)}`);if(requestId!==trafficRequestIds[scope])return;trafficData[scope]=data;renderTrafficDashboard(scope)}catch(error){if(requestId!==trafficRequestIds[scope])return;status.textContent=error.message}
+}
+
+function renderTrafficDashboard(scope){
+  const root=document.querySelector(`[data-traffic-dashboard="${scope}"]`),data=trafficData[scope];
+  if(!root||!data||!root.closest(".page")?.classList.contains("active"))return;
+  requestAnimationFrame(()=>window.ZRfrpTrafficCharts?.render(root,data));
 }
 
 function decorateResponsiveTables(root=document){

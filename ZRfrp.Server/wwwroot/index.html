@@ -44,7 +44,7 @@
       <nav>
         <button class="nav active admin-only" data-page="overview">主控总览</button>
         <button class="nav admin-only" data-page="nodes">服务节点</button>
-        <button class="nav admin-only" data-page="accounts">客户账号</button>
+        <button class="nav admin-only" data-page="accounts">用户账号</button>
         <button class="nav admin-only" data-page="clients">客户端</button>
         <button class="nav admin-only" data-page="tunnels">隧道分配</button>
         <button class="nav admin-only" data-page="config">模块化配置</button>
@@ -54,7 +54,7 @@
       </nav>
       <div class="aside-foot">
         <span id="node-health" class="health"><i></i>检测中</span>
-        <button id="version-button" class="quiet">v2.2.7</button>
+        <button id="version-button" class="quiet">v2.2.8</button>
         <button id="logout" class="quiet">退出登录</button>
       </div>
     </aside>
@@ -104,7 +104,7 @@
               <div class="donut-layout"><div class="donut-wrap"><canvas data-chart="protocols" aria-label="协议流量分布图"></canvas><div class="donut-total"><span>合计</span><strong>0 B</strong></div></div><div class="chart-legend" data-legend="protocols"></div></div>
             </section>
             <section class="panel chart-panel">
-              <div class="chart-title"><div><h3>账号用量排行</h3><p>所选区间内的客户流量</p></div></div>
+              <div class="chart-title"><div><h3>账号用量排行</h3><p>所选区间内的用户流量</p></div></div>
               <div class="ranking-list" data-ranking="accounts"></div>
             </section>
             <section class="panel chart-panel">
@@ -160,7 +160,7 @@
 
       <section id="page-accounts" class="page">
         <section class="panel full">
-          <div class="panel-head"><div><h2>客户账号</h2><p>账号状态、流量额度与使用情况</p></div><button id="new-account" class="primary">新建客户</button></div>
+          <div class="panel-head"><div><h2>用户账号</h2><p>区分管理员与客户账号的状态、流量额度和实际用量</p></div><button id="new-account" class="primary">新建客户</button></div>
           <form id="account-form" class="inline-form hidden">
             <input id="account-name" placeholder="用户名" required>
             <input id="account-password" type="password" placeholder="初始密码（至少 8 位）" required>
@@ -195,7 +195,7 @@
             <div class="panel-head"><div><h2>Desktop 登录授权</h2><p>设置新登录会话保持有效的时间，已签发会话不受影响</p></div></div>
             <div class="registration-controls"><label>授权时间（小时）<input id="session-hours" type="number" min="1" max="8760"></label><button id="save-session-settings" type="button">保存授权时间</button><span id="session-status"></span></div>
           </section>
-          <div class="table-wrap"><table><thead><tr><th>账号</th><th>状态</th><th>已用流量</th><th>额度</th><th>创建时间</th><th></th></tr></thead><tbody id="accounts-body"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>账号</th><th>类型</th><th>状态</th><th>已用流量</th><th>额度</th><th>创建时间</th><th></th></tr></thead><tbody id="accounts-body"></tbody></table></div>
         </section>
       </section>
 

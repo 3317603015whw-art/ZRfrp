@@ -43,6 +43,7 @@ public sealed class ServerState
     public Dictionary<string, long> TrafficInSnapshots { get; set; } = [];
     public Dictionary<string, long> TrafficOutSnapshots { get; set; } = [];
     public List<TrafficHistoryBucket> TrafficHistory { get; set; } = [];
+    public HashSet<string> TrafficHistoryInitializedKeys { get; set; } = [];
     public long TotalTrafficInBytes { get; set; }
     public long TotalTrafficOutBytes { get; set; }
     public SmtpSettings Smtp { get; set; } = new();

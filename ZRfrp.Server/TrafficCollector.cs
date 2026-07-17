@@ -58,7 +58,7 @@ public sealed class TrafficCollector : BackgroundService
                 }
 
                 LastDashboardProxyCount = dashboardProxyCount;
-                LastMatchedSampleCount = samples.Count;
+                LastMatchedSampleCount = Math.Max(0, samples.Count - unmatched.Count);
                 LastUnmatchedProxyCount = unmatched.Count;
                 LastUnmatchedSummary = string.Join("；", unmatched.Take(5));
                 if (dashboardProxyCount == 0 && !string.IsNullOrWhiteSpace(_frps.LastDashboardError))
@@ -110,7 +110,7 @@ public sealed class TrafficCollector : BackgroundService
             if (string.IsNullOrWhiteSpace(accountId))
             {
                 unmatched.Add($"{type}/{name} (user={ValueOrDash(user)}, client={ValueOrDash(clientId)}, port={remotePort})");
-                continue;
+                accountId = TrafficAccountingService.UnattributedAccountId;
             }
 
             var trafficIn = ReadLong(proxy, "today_traffic_in", "todayTrafficIn", "trafficIn", "traffic_in");
@@ -128,7 +128,7 @@ public sealed class TrafficCollector : BackgroundService
         if (!string.IsNullOrWhiteSpace(user))
         {
             var account = _store.State.Accounts.FirstOrDefault(item =>
-                item.Role == "customer"
+                item.Enabled
                 && (item.Id.Equals(user, StringComparison.Ordinal)
                     || item.Username.Equals(user, StringComparison.OrdinalIgnoreCase)));
             if (account is not null)
@@ -179,7 +179,7 @@ public sealed class TrafficCollector : BackgroundService
             return allocation.AccountId;
 
         return _store.State.Accounts
-            .Where(item => item.Role == "customer")
+            .Where(item => item.Enabled)
             .Select(item => item.Id)
             .FirstOrDefault(id => proxyName.StartsWith(id + ".", StringComparison.Ordinal)) ?? "";
     }

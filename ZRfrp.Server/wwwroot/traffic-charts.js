@@ -21,7 +21,8 @@
   }
 
   function prepareCanvas(canvas, height) {
-    const width = Math.max(260, Math.round(canvas.getBoundingClientRect().width || canvas.parentElement.clientWidth));
+    const width = Math.round(canvas.getBoundingClientRect().width || canvas.parentElement?.getBoundingClientRect().width || 0);
+    if (width < 2) return null;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
@@ -47,7 +48,9 @@
     const values = points.map(point => Number(point.trafficInBytes || 0) + Number(point.trafficOutBytes || 0));
     const hasData = values.some(value => value > 0);
     empty.classList.toggle("hidden", hasData);
-    const { context, width, height } = prepareCanvas(canvas, 250);
+    const prepared = prepareCanvas(canvas, 250);
+    if (!prepared) return;
+    const { context, width, height } = prepared;
     const pad = { left: 54, right: 18, top: 18, bottom: 34 };
     const chartWidth = width - pad.left - pad.right;
     const chartHeight = height - pad.top - pad.bottom;
@@ -126,7 +129,9 @@
     const legend = root.querySelector(`[data-legend="${key}"]`);
     if (!canvas || !legend) return;
     const sum = items.reduce((value, item) => value + total(item), 0);
-    const { context, width, height } = prepareCanvas(canvas, 172);
+    const prepared = prepareCanvas(canvas, 172);
+    if (!prepared) return;
+    const { context, width, height } = prepared;
     const size = Math.min(width, height) - 22;
     const centerX = width / 2, centerY = height / 2;
     context.clearRect(0, 0, width, height);
@@ -208,6 +213,10 @@
   function render(root, data) {
     if (!root || !data) return;
     state.set(root, data);
+    observeRoot(root);
+    const rootWidth = Math.round(root.getBoundingClientRect().width);
+    if (root.offsetParent === null || rootWidth < 2) return;
+    lastWidths.set(root, rootWidth);
     const periodTotal = Number(data.periodTrafficInBytes || 0) + Number(data.periodTrafficOutBytes || 0);
     root.querySelector('[data-stat="period-total"]').textContent = bytes(periodTotal);
     root.querySelector('[data-stat="period-in"]').textContent = bytes(data.periodTrafficInBytes);
@@ -220,6 +229,24 @@
     drawDonut(root, "protocols", data.protocols || []);
     renderRanking(root, "accounts", data.accounts || []);
     renderRanking(root, "tunnels", data.tunnels || []);
+  }
+
+  const observedRoots = new WeakSet();
+  const lastWidths = new WeakMap();
+  const rootObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(entries => {
+    entries.forEach(entry => {
+      const root = entry.target;
+      const width = Math.round(entry.contentRect.width);
+      if (width < 2 || root.offsetParent === null || lastWidths.get(root) === width) return;
+      const data = state.get(root);
+      if (data) render(root, data);
+    });
+  });
+
+  function observeRoot(root) {
+    if (!rootObserver || observedRoots.has(root)) return;
+    observedRoots.add(root);
+    rootObserver.observe(root);
   }
 
   let resizeTimer = 0;
