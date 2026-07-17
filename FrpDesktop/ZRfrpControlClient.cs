@@ -102,15 +102,19 @@ public sealed class ZRfrpControlClient
         var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
+            string? message = null;
             try
             {
                 var error = JsonSerializer.Deserialize<ControlError>(responseText, JsonOptions);
-                throw new InvalidOperationException(error?.Error ?? $"服务端拒绝了分配请求 ({(int)response.StatusCode})。");
+                message = error?.Error;
             }
             catch (JsonException)
             {
-                throw new InvalidOperationException($"服务端拒绝了分配请求 ({(int)response.StatusCode})。");
+                // Use the status-based fallback when the server did not return JSON.
             }
+            throw new ControlApiException(
+                response.StatusCode,
+                message ?? $"服务端拒绝了分配请求 ({(int)response.StatusCode})。");
         }
         return JsonSerializer.Deserialize<ManagedAllocation>(responseText, JsonOptions)
             ?? throw new InvalidOperationException("服务端返回了无效的分配结果。");
@@ -126,7 +130,22 @@ public sealed class ZRfrpControlClient
         var nodeId = Uri.EscapeDataString(profile.ManagedNodeId ?? "");
         using var response = await client.DeleteAsync(
             $"api/client/allocations/{Uri.EscapeDataString(allocationId)}?nodeId={nodeId}");
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var responseText = await response.Content.ReadAsStringAsync();
+            string? message = null;
+            try
+            {
+                message = JsonSerializer.Deserialize<ControlError>(responseText, JsonOptions)?.Error;
+            }
+            catch (JsonException)
+            {
+                // Use the status-based fallback when the server did not return JSON.
+            }
+            throw new ControlApiException(
+                response.StatusCode,
+                message ?? $"服务端拒绝了租约释放请求 ({(int)response.StatusCode})。");
+        }
     }
 
     private HttpClient CreateClient(FrpProfile profile)
@@ -218,6 +237,16 @@ public sealed class ZRfrpControlClient
     }
 
     private sealed record ControlError(string Error);
+}
+
+public sealed class ControlApiException : InvalidOperationException
+{
+    public ControlApiException(HttpStatusCode statusCode, string message) : base(message)
+    {
+        StatusCode = statusCode;
+    }
+
+    public HttpStatusCode StatusCode { get; }
 }
 
 public sealed record ManagedAllocation(

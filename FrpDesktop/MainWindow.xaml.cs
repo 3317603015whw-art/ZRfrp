@@ -960,14 +960,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task EnsureAuthorizationAsync(FrpProfile profile)
+    private async Task EnsureAuthorizationAsync(FrpProfile profile, bool forceRefresh = false)
     {
-        if (_authorizationRefreshedThisRun
+        if (!forceRefresh
+            && _authorizationRefreshedThisRun
             && profile.AccountTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(5)) return;
         if (string.IsNullOrWhiteSpace(profile.AccountRefreshToken)
             || profile.AccountRefreshExpiresAt <= DateTimeOffset.UtcNow)
         {
-            if (profile.AccountTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1)) return;
+            if (!forceRefresh && profile.AccountTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1)) return;
             throw new InvalidOperationException("登录授权已失效，请重新登录一次以启用自动续期。");
         }
         var platformUrl = string.IsNullOrWhiteSpace(_state.PlatformUrl)
@@ -1756,7 +1757,16 @@ public partial class MainWindow : Window
         {
             try
             {
-                await _controlClient.ReleaseAsync(profile, proxy.AllocationId);
+                try
+                {
+                    await _controlClient.ReleaseAsync(profile, proxy.AllocationId);
+                }
+                catch (ControlApiException exception)
+                    when (exception.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    await EnsureAuthorizationAsync(profile, forceRefresh: true);
+                    await _controlClient.ReleaseAsync(profile, proxy.AllocationId);
+                }
             }
             catch (Exception exception)
             {
@@ -2084,7 +2094,17 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("当前服务端自动分配仅支持 TCP/UDP 隧道。");
         }
 
-        var allocation = await _controlClient.AllocateAsync(profile, proxy);
+        ManagedAllocation allocation;
+        try
+        {
+            allocation = await _controlClient.AllocateAsync(profile, proxy);
+        }
+        catch (ControlApiException exception)
+            when (exception.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            await EnsureAuthorizationAsync(profile, forceRefresh: true);
+            allocation = await _controlClient.AllocateAsync(profile, proxy);
+        }
         if (string.IsNullOrWhiteSpace(profile.ManagedNodeId)
             || !profile.ManagedNodeId.Equals(allocation.NodeId, StringComparison.Ordinal)
             || !profile.ServerAddr.Equals(allocation.ServerAddress, StringComparison.OrdinalIgnoreCase)

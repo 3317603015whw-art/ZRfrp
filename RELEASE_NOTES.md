@@ -1,4 +1,10 @@
-# ZRfrp v2.2.4
+# ZRfrp v2.2.5
+
+- Desktop 在服务端端口分配返回 HTTP 401 时自动刷新控制平台授权并重试，修复登录令牌轮换后无法启动连接的问题。
+- 删除托管隧道释放端口租约遇到 HTTP 401 时采用相同的自动续期流程，避免旧 Access Token 导致删除失败。
+- 控制平台 API 异常保留 HTTP 状态码；Refresh Token 同样失效时明确提示重新登录，且不会无限重试。
+
+## v2.2.4
 
 - 邮件模板同时支持 `{{code}}` / `{{verification_code}}` 和 `{{expires_minutes}}` / `{{expires_in_minutes}}` 两套占位符。
 - 检测到包含旧错误占位符的模板时自动迁移为白底紫色标题栏的标准验证码邮件。
