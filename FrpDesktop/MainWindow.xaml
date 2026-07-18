@@ -1197,7 +1197,7 @@
                                 Click="CloseAppSettings_Click" />
                         <Button x:Name="ApplyFrpcEnvironmentButton"
                                 Grid.Column="2"
-                                Content="应用到全部节点"
+                                Content="保存修改"
                                 Style="{StaticResource PrimaryButton}"
                                 MinWidth="132"
                                 Click="ApplyFrpcEnvironmentButton_Click" />

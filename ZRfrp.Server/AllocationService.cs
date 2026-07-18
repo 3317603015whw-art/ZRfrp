@@ -18,7 +18,8 @@ public sealed class AllocationService
     }
 
     public async Task<(AllocationResponse? Result, string? Error)> AllocateAsync(
-        AllocationRequest request, CancellationToken cancellationToken, UserAccount? account = null)
+        AllocationRequest request, CancellationToken cancellationToken, UserAccount? account = null,
+        IReadOnlySet<int>? globallyReserved = null)
     {
         if (string.IsNullOrWhiteSpace(request.ClientId)
             || string.IsNullOrWhiteSpace(request.TunnelId)
@@ -62,8 +63,40 @@ public sealed class AllocationService
 
             var reserved = _store.State.Allocations.Where(item => item.Active)
                 .Select(item => item.RemotePort).ToHashSet();
-            var port = Enumerable.Range(_options.PortRangeStart, _options.PortRangeEnd - _options.PortRangeStart + 1)
-                .FirstOrDefault(candidate => !reserved.Contains(candidate) && IsPortAvailable(candidate, request.ProxyType));
+            if (globallyReserved is not null)
+            {
+                reserved.UnionWith(globallyReserved);
+            }
+
+            var port = request.PreferredRemotePort;
+            if (port > 0)
+            {
+                if (port < _options.PortRangeStart || port > _options.PortRangeEnd)
+                {
+                    return (null, $"指定端口不在专用端口池 {_options.PortRangeStart}-{_options.PortRangeEnd} 内。");
+                }
+                if (reserved.Contains(port) || !IsPortAvailable(port, request.ProxyType))
+                {
+                    return (null, "主控指定的候选端口已被占用，请重新分配。");
+                }
+            }
+            else
+            {
+                var candidates = Enumerable.Range(
+                        _options.PortRangeStart, _options.PortRangeEnd - _options.PortRangeStart + 1)
+                    .Where(candidate => !reserved.Contains(candidate))
+                    .ToList();
+                while (candidates.Count > 0)
+                {
+                    port = PortAllocationCoordinator.SelectRandomPort(candidates);
+                    if (IsPortAvailable(port, request.ProxyType))
+                    {
+                        break;
+                    }
+                    candidates.Remove(port);
+                    port = 0;
+                }
+            }
             if (port == 0)
             {
                 return (null, "可分配端口已耗尽。");

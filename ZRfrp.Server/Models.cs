@@ -311,7 +311,8 @@ public sealed record AllocationRequest(
     string ProxyName,
     string ProxyType,
     string BandwidthLimit,
-    string NodeId);
+    string NodeId,
+    int PreferredRemotePort = 0);
 public sealed record AllocationResponse(
     string AllocationId,
     string NodeName,

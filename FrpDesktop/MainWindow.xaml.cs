@@ -1386,15 +1386,16 @@ public partial class MainWindow : Window
 
     private void ApplyFrpcEnvironmentButton_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_detectedFrpcPath) || !File.Exists(_detectedFrpcPath))
+        if (!string.IsNullOrWhiteSpace(_detectedFrpcPath) && File.Exists(_detectedFrpcPath))
         {
-            SetEnvironmentStatus("无法应用", "请先检测、选择或安装一个有效的 frpc.exe。", "#D64545");
-            return;
+            ApplyFrpcEnvironmentToAllProfiles(_detectedFrpcPath);
         }
 
-        ApplyFrpcEnvironmentToAllProfiles(_detectedFrpcPath);
-        SetEnvironmentStatus("已应用到全部节点", "所有节点将在下次启动连接时使用此客户端。", "#17C964");
-        AppendLog($"已统一 frpc 路径：{_detectedFrpcPath}");
+        _state.ExitOnCloseWhenDisconnected = ExitOnCloseWhenDisconnectedCheckBox.IsChecked == true;
+        SaveNetworkProxySettings();
+        SaveState();
+        AppendLog("软件设置已保存并应用到全部节点。");
+        CloseOpenDialogs();
     }
 
     private async Task SetDetectedFrpcAsync(string path, string title)
@@ -1402,9 +1403,10 @@ public partial class MainWindow : Window
         _detectedFrpcPath = Path.GetFullPath(path);
         FrpcEnvironmentPathTextBox.Text = _detectedFrpcPath;
         var version = await _environmentService.GetVersionAsync(_detectedFrpcPath);
+        ApplyFrpcEnvironmentToAllProfiles(_detectedFrpcPath);
         var detail = string.IsNullOrWhiteSpace(version)
-            ? "frpc.exe 可访问，可以应用到全部节点。"
-            : $"版本 {version}，可以应用到全部节点。";
+            ? "frpc.exe 可访问，已设为全部节点的默认客户端。"
+            : $"版本 {version}，已设为全部节点的默认客户端。";
         SetEnvironmentStatus(title, detail, "#17C964");
     }
 
@@ -1430,8 +1432,7 @@ public partial class MainWindow : Window
         DetectFrpcButton.IsEnabled = !isBusy;
         ChooseEnvironmentFrpcButton.IsEnabled = !isBusy;
         InstallFrpcButton.IsEnabled = !isBusy;
-        ApplyFrpcEnvironmentButton.IsEnabled =
-            !isBusy && !string.IsNullOrWhiteSpace(_detectedFrpcPath) && File.Exists(_detectedFrpcPath);
+        ApplyFrpcEnvironmentButton.IsEnabled = !isBusy;
         EnvironmentProgressBar.Visibility = isDownloading ? Visibility.Visible : Visibility.Collapsed;
         EnvironmentProgressText.Visibility = isDownloading ? Visibility.Visible : Visibility.Collapsed;
     }

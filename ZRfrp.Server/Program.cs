@@ -26,6 +26,7 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<StateStore>();
 builder.Services.AddSingleton<FrpsManager>();
 builder.Services.AddSingleton<AllocationService>();
+builder.Services.AddSingleton<PortAllocationCoordinator>();
 builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<SubscriptionService>();
 builder.Services.AddSingleton<AlipayPaymentService>();
@@ -1608,6 +1609,7 @@ app.MapPost("/api/client/allocate", async (
     AccountResolver accountResolver,
     StateStore store,
     ServerOptions serverOptions,
+    PortAllocationCoordinator portCoordinator,
     CancellationToken cancellationToken) =>
 {
     var account = await accountResolver.ResolveAsync(GetBearerToken(context), cancellationToken);
@@ -1626,30 +1628,35 @@ app.MapPost("/api/client/allocate", async (
     {
         return Results.Json(new { error = "当前订阅不包含所选服务节点。" }, statusCode: 403);
     }
-    if (account is not null && account.MaxChannels > 0)
+    await portCoordinator.Gate.WaitAsync(cancellationToken);
+    try
     {
         var managed = await GetManagedAllocationsAsync(store, serverOptions, cancellationToken);
-        var activeKeys = managed
-            .Where(item => item.Active && item.AccountId == account.Id)
-            .Select(item => $"{item.ClientId}\u001f{item.TunnelId}")
-            .ToHashSet(StringComparer.Ordinal);
-        var requestedKey = $"{request.ClientId}\u001f{request.TunnelId}";
-        if (!activeKeys.Contains(requestedKey) && activeKeys.Count >= account.MaxChannels)
+        if (account is not null && account.MaxChannels > 0)
         {
-            return Results.Json(new
+            var activeKeys = managed
+                .Where(item => item.Active && item.AccountId == account.Id)
+                .Select(item => $"{item.ClientId}\u001f{item.TunnelId}")
+                .ToHashSet(StringComparer.Ordinal);
+            var requestedKey = $"{request.ClientId}\u001f{request.TunnelId}";
+            if (!activeKeys.Contains(requestedKey) && activeKeys.Count >= account.MaxChannels)
             {
-                error = $"当前订阅最多允许 {account.MaxChannels} 个通道，请先关闭其他通道。"
-            }, statusCode: 403);
+                return Results.Json(new
+                {
+                    error = $"当前订阅最多允许 {account.MaxChannels} 个通道，请先关闭其他通道。"
+                }, statusCode: 403);
+            }
         }
-    }
-    if (requestedNodeId.Equals(LocalNodeId(serverOptions), StringComparison.Ordinal))
-    {
-        var result = await allocations.AllocateAsync(
-            request with { NodeId = requestedNodeId }, cancellationToken, account);
-        return result.Result is not null
-            ? Results.Ok(result.Result)
-            : Results.BadRequest(new { error = result.Error });
-    }
+        var globallyReserved = managed.Where(item => item.Active)
+            .Select(item => item.RemotePort).ToHashSet();
+        if (requestedNodeId.Equals(LocalNodeId(serverOptions), StringComparison.Ordinal))
+        {
+            var result = await allocations.AllocateAsync(
+                request with { NodeId = requestedNodeId }, cancellationToken, account, globallyReserved);
+            return result.Result is not null
+                ? Results.Ok(result.Result)
+                : Results.BadRequest(new { error = result.Error });
+        }
 
     var cutoff = DateTimeOffset.UtcNow.AddSeconds(-45);
     var node = store.State.Nodes.FirstOrDefault(item =>
@@ -1678,19 +1685,60 @@ app.MapPost("/api/client/allocate", async (
     }
 
     using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-    using var peerRequest = new HttpRequestMessage(
-        HttpMethod.Post, node.ControlUrl.TrimEnd('/') + "/api/peer/allocate");
-    peerRequest.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
-    peerRequest.Content = JsonContent.Create(new PeerAllocationRequest(
-        request with { NodeId = requestedNodeId }, account?.Id ?? ""));
-    using var peerResponse = await client.SendAsync(peerRequest, cancellationToken);
-    var peerBody = await peerResponse.Content.ReadAsStringAsync(cancellationToken);
-    if (!peerResponse.IsSuccessStatusCode)
+    AllocationResponse? peerAllocation = null;
+    string? lastPeerError = null;
+    var existingAllocation = managed.FirstOrDefault(item => item.Active
+        && item.NodeId.Equals(requestedNodeId, StringComparison.Ordinal)
+        && item.ClientId.Equals(request.ClientId, StringComparison.Ordinal)
+        && item.TunnelId.Equals(request.TunnelId, StringComparison.Ordinal));
+    for (var attempt = 0; attempt < 12 && peerAllocation is null; attempt++)
     {
-        return Results.BadRequest(new { error = ReadRemoteError(peerBody, "远程节点拒绝了端口分配。") });
+        var candidatePort = existingAllocation?.RemotePort
+            ?? PortAllocationCoordinator.SelectRandomPort(
+                serverOptions.PortRangeStart, serverOptions.PortRangeEnd, globallyReserved);
+        if (candidatePort == 0)
+        {
+            return Results.BadRequest(new { error = "全局专用端口池已耗尽。" });
+        }
+
+        using var peerRequest = new HttpRequestMessage(
+            HttpMethod.Post, node.ControlUrl.TrimEnd('/') + "/api/peer/allocate");
+        peerRequest.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
+        peerRequest.Content = JsonContent.Create(new PeerAllocationRequest(
+            request with { NodeId = requestedNodeId, PreferredRemotePort = candidatePort }, account?.Id ?? ""));
+        using var peerResponse = await client.SendAsync(peerRequest, cancellationToken);
+        var peerBody = await peerResponse.Content.ReadAsStringAsync(cancellationToken);
+        if (peerResponse.IsSuccessStatusCode)
+        {
+            peerAllocation = JsonSerializer.Deserialize<AllocationResponse>(
+                peerBody, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (peerAllocation is not null && peerAllocation.RemotePort != candidatePort)
+            {
+                using var releaseRequest = new HttpRequestMessage(
+                    HttpMethod.Delete,
+                    $"{node.ControlUrl.TrimEnd('/')}/api/peer/allocations/{Uri.EscapeDataString(peerAllocation.AllocationId)}");
+                releaseRequest.Headers.Add("X-ZRfrp-Peer-Key", serverOptions.PeerKey);
+                try
+                {
+                    using var _ = await client.SendAsync(releaseRequest, cancellationToken);
+                }
+                catch
+                {
+                    // The mismatched allocation is rejected even if cleanup must wait for node maintenance.
+                }
+                return Results.BadRequest(new { error = "远程节点未采用主控分配的全局端口，请先将该节点更新到当前版本。" });
+            }
+            break;
+        }
+
+        lastPeerError = ReadRemoteError(peerBody, "远程节点拒绝了端口分配。");
+        if (existingAllocation is not null
+            || !lastPeerError.Contains("候选端口已被占用", StringComparison.Ordinal))
+        {
+            return Results.BadRequest(new { error = lastPeerError });
+        }
+        globallyReserved.Add(candidatePort);
     }
-    var peerAllocation = JsonSerializer.Deserialize<AllocationResponse>(
-        peerBody, new JsonSerializerOptions(JsonSerializerDefaults.Web));
     if (peerAllocation is not null
         && !string.Equals(peerAllocation.NodeId, requestedNodeId, StringComparison.Ordinal))
     {
@@ -1698,7 +1746,7 @@ app.MapPost("/api/client/allocate", async (
     }
     if (peerAllocation is null)
     {
-        return Results.BadRequest(new { error = "远程节点返回了无效分配结果。" });
+        return Results.BadRequest(new { error = lastPeerError ?? "远程节点返回了无效分配结果。" });
     }
 
     // The master owns the externally reachable address. A cloud node may only
@@ -1715,6 +1763,11 @@ app.MapPost("/api/client/allocate", async (
         NodeId = node.Id
     };
     return Results.Ok(publicAllocation);
+    }
+    finally
+    {
+        portCoordinator.Gate.Release();
+    }
 });
 
 app.MapDelete("/api/client/allocations/{id}", async (
